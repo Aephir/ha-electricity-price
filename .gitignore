@@ -1,0 +1,9 @@
+__pycache__
+tests
+pythonenv*
+venv
+.venv
+.coverage
+.idea
+.storage
+.DS_Store

@@ -1,0 +1,1 @@
+DOMAIN = "electricity_price"
