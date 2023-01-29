@@ -6,6 +6,7 @@
   "domain": "electricity_price",
   "iot_class": "cloud_polling",
   "name": "Electricity Price",
+  "integration_type": "service",
   "requirements": [],
   "version": "0.0.1"
 }
