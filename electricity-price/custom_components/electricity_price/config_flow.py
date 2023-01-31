@@ -1,17 +1,11 @@
-from copy import deepcopy
 import logging
 from typing import Any, Dict, Optional
 
-from gidgethub import BadRequest
-from gidgethub.aiohttp import GitHubAPI
 from homeassistant import config_entries, core
-from homeassistant.const import CONF_ACCESS_TOKEN, CONF_NAME, CONF_PATH, CONF_URL
-from homeassistant.core import callback
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity_registry import (
-    async_entries_for_config_entry,
-    async_get_registry,
+    async_get,
+    EntityRegistry,
 )
 import voluptuous as vol
 
@@ -20,13 +14,6 @@ from .const import (
     CONF_CHARGE,
     CONF_PRICE_SENSOR,
     DOMAIN,
-    NAME,
-    ENTITY_ID,
-    CONF_TRANSPORT_FEE,
-    CONF_START_DATE,
-    CONF_END_DATE,
-    CONF_START_TIME,
-    CONF_END_TIME,
     CONF_TRANSPORT_FEE_LOW_DATES_LOW_LOAD,
     CONF_TRANSPORT_FEE_LOW_DATES_HIGH_LOAD,
     CONF_TRANSPORT_FEE_LOW_DATES_PEAK_LOAD,
@@ -84,7 +71,7 @@ TIME_RANGE_SCHEMA = vol.Schema(
 )
 
 
-async def async_validate_sensor(sensor: str, user_input: str, hass: core.HassJob) -> None:
+async def async_validate_sensor(sensor: str, hass: core.HomeAssistant) -> None:
     """Validates a Home Assistant Nordpool sensor.
     https://github.com/custom-components/nordpool
     Raises a ValueError if the path is invalid.
@@ -93,7 +80,12 @@ async def async_validate_sensor(sensor: str, user_input: str, hass: core.HassJob
         sensor.split(".")[1]
     except IndexError:
         raise IndexError
-    nordpool_attribute_keys = hass.states.get(user_input[CONF_PRICE_SENSOR]).attributes.keys()
+
+    # entity_registry: EntityRegistry = async_get(hass)
+    # entities = entity_registry.entities
+    # entry: RegistryEntry = entities.get(sensor)
+    price_state = hass.states.get(sensor)
+    nordpool_attribute_keys = price_state.attributes.keys()
     check_attributes = [
         "current_price",
         "raw_today",
@@ -130,12 +122,12 @@ async def async_validate_range(time_range: str) -> None:
         range_list = time_range.split("-")
         if len(range_list) <= 1:
             raise ValueError
-    except:
+    except:  # What exception would actually be applicable?
         raise ValueError
 
 
 class ElectricityPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Github Custom config flow."""
+    """Electricity price config flow."""
 
     data: Optional[Dict[str, Any]]
 
@@ -146,7 +138,7 @@ class ElectricityPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: Dict[str, str] = {}
         if user_input is not None:
             try:
-                await async_validate_sensor(user_input[CONF_PRICE_SENSOR], self.hass)
+                await async_validate_sensor(user_input[CONF_PRICE_SENSOR], core.HomeAssistant)
             except ValueError:
                 errors["base"] = "auth"
             if not errors:
@@ -205,10 +197,10 @@ class ElectricityPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self.data[CONF_TRANSPORT_FEE_HIGH_DATES_HIGH_LOAD] = user_input[CONF_TRANSPORT_FEE_HIGH_DATES_HIGH_LOAD]
                 self.data[CONF_TRANSPORT_FEE_HIGH_DATES_PEAK_LOAD] = user_input[CONF_TRANSPORT_FEE_HIGH_DATES_PEAK_LOAD]
                 return await self.async_variable_dates()
-                # If user ticked the box show this form again so they can add an
+                # If user ticked the box show this form again, so they can add additional variable charges.
                 # time period .
                 # if user_input.get("add_another", False):
-                #     return await self.async_step_repo()
+                #     return await self.async_variable_charge()
 
         return self.async_show_form(
             step_id="variable_charge", data_schema=VARIABLE_CHARGE_SCHEMA, errors=errors
@@ -241,7 +233,11 @@ class ElectricityPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     async def async_variable_times(self, user_input: Optional[Dict[str, Any]] = None):
-
+        """This is the fifth config flow to add times for low, high, and peak fee ranges.
+        This should be added in a format as:
+            `HH:MM - HH:MM`, `HH:MM - HH:MM; HH:MM - HH:MM`
+            `HH - HH`, `HH - HH; HH - HH`
+        """
         errors: Dict[str, str] = {}
         if user_input is not None:
 
@@ -261,4 +257,3 @@ class ElectricityPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="variable_charge", data_schema=DATE_RANGE_SCHEMA, errors=errors
         )
-

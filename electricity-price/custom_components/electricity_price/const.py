@@ -39,7 +39,9 @@ CONF_LOW_FEE_DATES = "high_fee_dates"
 CONF_LOW_LOAD_TIMES = "low_load_times"
 CONF_HIGH_LOAD_TIMES = "high_load_times"
 CONF_PEAK_LOAD_TIMES = "peak_load_times"
-
+CONF_TRANSPORT_LOW = "transport_low"
+CONF_TRANSPORT_HIGH = "transport_high"
+CONF_TRANSPORT_PEAK = "transport_peak"
 
 CONF_PRICE_SENSOR = "price_sensor"
 
@@ -55,6 +57,8 @@ ATTR_CURRENT_RAW_PRICE = "current_raw_price"
 ATTR_CURRENT_TRANSPORT_FEES = "current_transport_fees"
 ATTR_CURRENT_TAX = "current_tax"
 ATTR_CURRENT_ELECTRICITY_FEE = "current_electricity_fee"
+ATTR_STATE_CLASS = "state_class"
+ATTR_LAST_UPDATED = "last_updated"
 
 CONST_HOURS = [
     "00",
@@ -95,5 +99,15 @@ CONST_MONTHS = {
     "10": ["october", "oct"],
     "11": ["november", "nov"],
     "12": ["december", "dec"],
+}
+
+# https://radiuselnet.dk/elnetkunder/tariffer-og-netabonnement/
+CONST_DEFAULT_FEES = {
+    "high_date_low_load": 17.01,
+    "high_date_high_load": 51.03,
+    "high_date_peak_load": 153.08,
+    "low_date_low_load": 17.01,
+    "low_date_high_load": 25.51,
+    "low_date_peak_load": 66.33,
 }
 
