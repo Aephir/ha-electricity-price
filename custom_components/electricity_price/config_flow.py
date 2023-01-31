@@ -1,7 +1,8 @@
 import logging
 from typing import Any, Dict, Optional
 
-from homeassistant import config_entries, core
+from homeassistant import config_entries
+from homeassistant.core import HomeAssistant
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 
@@ -67,10 +68,12 @@ TIME_RANGE_SCHEMA = vol.Schema(
 )
 
 
-async def async_validate_sensor(sensor: str, hass: core.HomeAssistant) -> None:
+async def async_validate_sensor(sensor: str, hass: HomeAssistant) -> None:
     """Validates a Home Assistant Nordpool sensor.
     https://github.com/custom-components/nordpool
     Raises a ValueError if the path is invalid.
+    :param sensor:
+    :type hass: object
     """
     try:
         sensor.split(".")[1]
@@ -132,9 +135,12 @@ class ElectricityPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         Does the name have to be "async_step_user" to be invoked automatically?
         """
         errors: Dict[str, str] = {}
+        device_unique_id = "total_electricity_price_per_hour"
+        await self.async_set_unique_id(device_unique_id)
+        self._abort_if_unique_id_configured()
         if user_input is not None:
             try:
-                await async_validate_sensor(user_input[CONF_PRICE_SENSOR], core.HomeAssistant)
+                await async_validate_sensor(user_input[CONF_PRICE_SENSOR], self.hass)
             except ValueError:
                 errors["base"] = "auth"
             if not errors:
