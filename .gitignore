@@ -1,5 +1,4 @@
 __pycache__
-tests
 pythonenv*
 venv
 .venv
@@ -8,3 +7,4 @@ venv
 .storage
 .DS_Store
 /tests
+setup.cfg
