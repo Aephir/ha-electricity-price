@@ -57,5 +57,6 @@ async def async_setup(hass: core.HomeAssistant, config: dict) -> bool:
     """Set up the Electricity Price component."""
     # @TODO: Add setup code.
     # hass.states.async_set("hello_state.world", "Paulus")
+    # Should I delete the below to se the flow_config
     hass.data.setdefault(DOMAIN, {})
     return True
