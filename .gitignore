@@ -7,3 +7,4 @@ venv
 .idea
 .storage
 .DS_Store
+/tests

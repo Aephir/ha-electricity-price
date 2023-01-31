@@ -3,10 +3,6 @@ from typing import Any, Dict, Optional
 
 from homeassistant import config_entries, core
 import homeassistant.helpers.config_validation as cv
-from homeassistant.helpers.entity_registry import (
-    async_get,
-    EntityRegistry,
-)
 import voluptuous as vol
 
 from .const import (
