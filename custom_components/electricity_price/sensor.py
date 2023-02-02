@@ -55,6 +55,7 @@ from .validation_helpers import number_validation, percentage_validation
 
 _LOGGER = logging.getLogger(__name__)
 # Time between updating data from GitHub
+# I should see if it can subscribe to changes in Nordpool sensor instead.
 SCAN_INTERVAL = timedelta(minutes=10)
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
