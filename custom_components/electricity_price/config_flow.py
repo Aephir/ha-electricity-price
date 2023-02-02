@@ -23,7 +23,7 @@ from .const import (
     CONF_HIGH_LOAD_TIMES,
     CONF_PEAK_LOAD_TIMES,
 )
-import helpers as cv_helpers
+import validation_helpers as cv_helpers
 
 _LOGGER = logging.getLogger(__name__)
 

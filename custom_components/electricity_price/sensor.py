@@ -51,7 +51,7 @@ from .const import (
     CONF_PEAK_LOAD_TIMES,
     CONST_HOURS,
 )
-from .helpers import number_validation, percentage_validation
+from .validation_helpers import number_validation, percentage_validation
 
 _LOGGER = logging.getLogger(__name__)
 # Time between updating data from GitHub
