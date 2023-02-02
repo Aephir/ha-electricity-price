@@ -51,7 +51,7 @@ from .const import (
     CONF_PEAK_LOAD_TIMES,
     CONST_HOURS,
 )
-import helpers
+from .helpers import number_validation, percentage_validation
 
 _LOGGER = logging.getLogger(__name__)
 # Time between updating data from GitHub
@@ -60,9 +60,9 @@ SCAN_INTERVAL = timedelta(minutes=10)
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
         vol.Required(CONF_PRICE_SENSOR): cv.entity_id,
-        vol.Optional(CONF_TAX): helpers.percentage,
-        vol.Optional(CONF_CHARGE): helpers.number,
-        vol.Optional(CONF_TRANSPORT_FEE): helpers.number,
+        vol.Optional(CONF_TAX): percentage_validation,
+        vol.Optional(CONF_CHARGE): number_validation,
+        vol.Optional(CONF_TRANSPORT_FEE): number_validation,
         vol.Optional(CONF_START_DATE): cv.date,
         vol.Optional(CONF_END_DATE): cv.date,
         vol.Optional(CONF_START_TIME): cv.time,

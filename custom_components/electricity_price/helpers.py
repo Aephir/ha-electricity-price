@@ -5,14 +5,14 @@ from typing import Any
 import voluptuous as vol
 
 
-def number(value: Any) -> float:
+def number_validation(value: Any) -> float:
     try:
         return float(value)
     except ValueError:
         raise vol.Invalid('You should input a number in DKK. Either a whole number (integer) or decimal number (float)')
 
 
-def percentage(value: Any) -> float:
+def percentage_validation(value: Any) -> float:
     try:
         return float(value)
     except ValueError:
