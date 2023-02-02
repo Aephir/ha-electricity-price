@@ -60,9 +60,9 @@ SCAN_INTERVAL = timedelta(minutes=10)
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
         vol.Required(CONF_PRICE_SENSOR): cv.entity_id,
-        vol.Optional(CONF_TAX): percentage_validation,
-        vol.Optional(CONF_CHARGE): number_validation,
-        vol.Optional(CONF_TRANSPORT_FEE): number_validation,
+        vol.Optional(CONF_TAX): cv.string,  # percentage_validation,
+        vol.Optional(CONF_CHARGE): cv.string,  # number_validation,
+        vol.Optional(CONF_TRANSPORT_FEE): cv.string,  # number_validation,
         vol.Optional(CONF_START_DATE): cv.date,
         vol.Optional(CONF_END_DATE): cv.date,
         vol.Optional(CONF_START_TIME): cv.time,

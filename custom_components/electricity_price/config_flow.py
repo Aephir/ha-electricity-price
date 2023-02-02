@@ -23,7 +23,7 @@ from .const import (
     CONF_HIGH_LOAD_TIMES,
     CONF_PEAK_LOAD_TIMES,
 )
-import validation_helpers as cv_helpers
+# import validation_helpers as cv_helpers
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -35,19 +35,19 @@ SENSOR_SCHEMA = vol.Schema(
 
 FIXED_CHARGE_SCHEMA = vol.Schema(
     {
-        vol.Optional(CONF_CHARGE): cv_helpers.number,
-        vol.Optional(CONF_TAX): cv_helpers.percentage,
+        vol.Optional(CONF_CHARGE): cv.string,  # cv_helpers.number,
+        vol.Optional(CONF_TAX): cv.string,  # cv_helpers.percentage,
     }
 )
 
 VARIABLE_CHARGE_SCHEMA = vol.Schema(
     {
-        vol.Optional(CONF_TRANSPORT_FEE_LOW_DATES_LOW_LOAD): cv_helpers.number,
-        vol.Optional(CONF_TRANSPORT_FEE_LOW_DATES_HIGH_LOAD): cv_helpers.number,
-        vol.Optional(CONF_TRANSPORT_FEE_LOW_DATES_PEAK_LOAD): cv_helpers.number,
-        vol.Optional(CONF_TRANSPORT_FEE_HIGH_DATES_LOW_LOAD): cv_helpers.number,
-        vol.Optional(CONF_TRANSPORT_FEE_HIGH_DATES_HIGH_LOAD): cv_helpers.number,
-        vol.Optional(CONF_TRANSPORT_FEE_HIGH_DATES_PEAK_LOAD): cv_helpers.number,
+        vol.Optional(CONF_TRANSPORT_FEE_LOW_DATES_LOW_LOAD): cv.string,  # cv_helpers.number,
+        vol.Optional(CONF_TRANSPORT_FEE_LOW_DATES_HIGH_LOAD): cv.string,  # cv_helpers.number,
+        vol.Optional(CONF_TRANSPORT_FEE_LOW_DATES_PEAK_LOAD): cv.string,  # cv_helpers.number,
+        vol.Optional(CONF_TRANSPORT_FEE_HIGH_DATES_LOW_LOAD): cv.string,  # cv_helpers.number,
+        vol.Optional(CONF_TRANSPORT_FEE_HIGH_DATES_HIGH_LOAD): cv.string,  # cv_helpers.number,
+        vol.Optional(CONF_TRANSPORT_FEE_HIGH_DATES_PEAK_LOAD): cv.string,  # cv_helpers.number,
         # vol.Optional("add_another"): cv.boolean,
     }
 )
