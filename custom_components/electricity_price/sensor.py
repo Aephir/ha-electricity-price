@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pyeloverblik import Eloverblik
+import json
 import logging
 from typing import Any
 from datetime import datetime, timedelta
@@ -27,11 +29,6 @@ from .const import (
     DOMAIN,
     NAME,
     ENTITY_ID,
-    CONF_TRANSPORT_FEE,
-    CONF_START_DATE,
-    CONF_END_DATE,
-    CONF_START_TIME,
-    CONF_END_TIME,
     ATTR_TODAY,
     ATTR_TOMORROW,
     ATTR_CURRENCY,
@@ -39,35 +36,30 @@ from .const import (
     ATTR_REGION,
     ATTR_STATE_CLASS,
     ATTR_LAST_UPDATED,
-    CONF_TRANSPORT_FEE_LOW_DATES_LOW_LOAD,
-    CONF_TRANSPORT_FEE_LOW_DATES_HIGH_LOAD,
-    CONF_TRANSPORT_FEE_LOW_DATES_PEAK_LOAD,
-    CONF_TRANSPORT_FEE_HIGH_DATES_LOW_LOAD,
-    CONF_TRANSPORT_FEE_HIGH_DATES_HIGH_LOAD,
-    CONF_TRANSPORT_FEE_HIGH_DATES_PEAK_LOAD,
-    CONF_HIGH_FEE_DATES,
-    CONF_LOW_LOAD_TIMES,
-    CONF_HIGH_LOAD_TIMES,
-    CONF_PEAK_LOAD_TIMES,
-    CONST_HOURS,
+    CONF_ELOVERBLIK_TOKEN,
+    CONF_METERING_POINT,
+    ATTR_TRANS_NETTARIF,
+    ATTR_SYSTEMTARIF,
+    ATTR_ELAFGIFT,
+    ATTR_HOUR_NETTARIF,
+    CONF_DEFAULT_SUMMER_TARIFS,
+    CONF_DEFAULT_WINTER_TARIFS,
 )
 from .validation_helpers import number_validation, percentage_validation
 
 _LOGGER = logging.getLogger(__name__)
-# Time between updating data from GitHub
+
+# Time between updating data
 # I should see if it can subscribe to changes in Nordpool sensor instead.
+# https://developers.home-assistant.io/docs/integration_listen_events#tracking-entity-state-changes
+# Maybe async_track_state_change ??
 SCAN_INTERVAL = timedelta(minutes=10)
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
     {
         vol.Required(CONF_PRICE_SENSOR): cv.entity_id,
-        vol.Optional(CONF_TAX): cv.string,  # percentage_validation,
-        vol.Optional(CONF_CHARGE): cv.string,  # number_validation,
-        vol.Optional(CONF_TRANSPORT_FEE): cv.string,  # number_validation,
-        vol.Optional(CONF_START_DATE): cv.date,
-        vol.Optional(CONF_END_DATE): cv.date,
-        vol.Optional(CONF_START_TIME): cv.time,
-        vol.Optional(CONF_END_TIME): cv.time,
+        vol.Optional(CONF_ELOVERBLIK_TOKEN): cv.string,
+        vol.Optional(CONF_METERING_POINT): cv.string,
     }
 )
 
@@ -98,19 +90,6 @@ def setup_platform(
     raw_sensor = config[CONF_PRICE_SENSOR]
     sensors = [PriceSensor(raw_sensor, config)]
     add_entities(sensors, update_before_add=True)
-
-
-def format_time_slots(time_slot: str) -> list[str]:
-    """Format the input to usable datetime objects to compare
-    This should be added in a format as:
-        `HH:MM - HH:MM`, `HH:MM - HH:MM; HH:MM - HH:MM`
-        `HH - HH`, `HH - HH; HH - HH`
-    """
-    input_times: list[str] = time_slot.split("-")
-    hour_list: list[str] = [i.split(":")[0] for i in input_times]
-    hour_list = ["0" + i if len(i) == 1 else i for i in hour_list]
-
-    return hour_list
 
 
 def last_updated() -> str:
@@ -155,36 +134,20 @@ class PriceSensor(Entity):
         return self.attrs
 
     async def async_update(self) -> None:
-        """Updates the sensor"""
+        """Updates the sensor
+        TODO: Make the "Total today" and "Total tomorrow" attributes like Nordpool sensor has for easy ApexChart use"""
 
+        all_fees, total_prices = self.get_sensor_data()
+
+        # Is this how to get attributes from a Home Assistant entity_id (CONF_PRICE_SENSOR)?
         price_state = self.config[CONF_PRICE_SENSOR]
         attributes = price_state.attributes
-        tax = 1 + (float(self.config[CONF_TAX])/100)
-        flat_fee = float(self.config[CONF_CHARGE])
-        total_today: list[float] = []
-        total_tomorrow: list[float] = []
 
-        format_of_date: str = self.determine_format_of_dates()
-        high_fee_date_range: list[bool] = self.high_or_low_date_range(format_of_date)
-        today_fees, tomorrow_fees, now_price = self.get_time_slots(high_fee_date_range)
-
-        if attributes["today"]:
-            try:
-                total_today = [
-                    round((float(attributes["today"][i]) + today_fees[i] + flat_fee) * tax, 2) for i in range(24)
-                ]
-            except IndexError:
-                total_today = 24 * [0.0]
-        if attributes["tomorrow"]:
-            try:
-                total_tomorrow = [
-                    round((float(attributes["tomorrow"][i]) + today_fees[i] + flat_fee) * tax, 2) for i in range(24)
-                ]
-            except IndexError:
-                total_tomorrow = []
-
-        self.attrs[ATTR_TODAY] = total_today
-        self.attrs[ATTR_TOMORROW] = total_tomorrow
+        self.attrs[ATTR_TODAY] = total_prices[ATTR_TODAY]
+        self.attrs[ATTR_TOMORROW] = total_prices[ATTR_TOMORROW]
+        self.attrs[ATTR_TRANS_NETTARIF] = all_fees[ATTR_TODAY][ATTR_TRANS_NETTARIF]
+        self.attrs[ATTR_SYSTEMTARIF] = all_fees[ATTR_TODAY][ATTR_SYSTEMTARIF]
+        self.attrs[ATTR_ELAFGIFT] = all_fees[ATTR_TODAY][ATTR_ELAFGIFT]
         self.attrs[ATTR_CURRENCY] = attributes[ATTR_CURRENCY]
         self.attrs[ATTR_COUNTRY] = attributes[ATTR_COUNTRY]
         self.attrs[ATTR_REGION] = attributes[ATTR_REGION]
@@ -192,172 +155,132 @@ class PriceSensor(Entity):
         self.attrs[ATTR_LAST_UPDATED] = last_updated()
         self.attrs[ATTR_ICON] = "mdi:flash"
 
-        self._state = now_price
+        self._state = self.price_now(total_prices)
 
-    def determine_format_of_dates(self) -> str:
-        """This assesses whether it is currently the date range for high or low fees
-        This should be added in a format as:
-            `YYYYMMDD - YYYYMMDD`, `YYMMDD-YYMMDD`, `MMDD-MMDD`, `MM-MM`
-            `month - month` (e.g. `october - april`)
-            `mon - mon` (e.g. `oct - apr`)
+    def get_sensor_data(self):
+        """Create all data for sensor"""
+
+        all_fees = self.get_fees
+        total_prices = self.calculate_total(all_fees)
+        self._state = self.price_now(total_prices)
+
+        self.attrs[ATTR_TRANS_NETTARIF] = all_fees[ATTR_TRANS_NETTARIF]
+        self.attrs[ATTR_SYSTEMTARIF] = all_fees[ATTR_SYSTEMTARIF]
+        self.attrs[ATTR_ELAFGIFT] = all_fees[ATTR_ELAFGIFT]
+        self.attrs[ATTR_HOUR_NETTARIF] = all_fees[ATTR_HOUR_NETTARIF]
+
+        return all_fees, total_prices
+
+    @property
+    def get_fees(self) -> dict[dict[str, str]]:
+        """Get fees from the eloverblik API.
+        Default to using the ones in the sensor attributes if unavailable.
+        TODO: Get both today and tomorrow fees.
         """
-        high_fee_dates_input = self.config[CONF_HIGH_FEE_DATES].replace(" ", "")
-        high_fee_date_list = high_fee_dates_input.split(";")
-        test_date_format = high_fee_dates_input
-        format_of_date = ""
-        if len(high_fee_date_list) > 1:
-            test_date_format = high_fee_date_list[0]
-        test_date_format_split = test_date_format.split("-")[0]
+
+        _token = self.config[CONF_ELOVERBLIK_TOKEN]
+        _metering_point = self.config[CONF_METERING_POINT]
+
+        client = Eloverblik(_token)
+        data = client.get_latest(_metering_point)
+        if int(data.status) == 200:
+            # {'transmissions_nettarif': 0.058, 'systemtarif': 0.054, 'elafgift': 0.008, 'nettarif_c_time': [0.1837, 0.1837, 0.1837, 0.1837, 0.1837, 0.1837, 0.5511, 0.5511, 0.5511, 0.5511, 0.5511, 0.5511, 0.5511, 0.5511, 0.5511, 0.5511, 0.5511, 1.6533, 1.6533, 1.6533, 1.6533, 0.5511, 0.5511, 0.5511]}
+            charges = json.loads(data.charges)
+            # Charges are in øre per Wh. Multiply by 1000 and divide by 100 (i.e., multiply by 10) to get DKK/kWh.
+            trans_net_tarif = float(charges[ATTR_TRANS_NETTARIF]) * 10
+            system_tarif = float(charges[ATTR_SYSTEMTARIF]) * 10
+            elafgift = float(charges[ATTR_ELAFGIFT]) * 10
+            hour_net_tarif = [float(i) * 10 for i in charges[ATTR_HOUR_NETTARIF]]
+        else:
+            trans_net_tarif = self.hass.states.get(ENTITY_ID).attribute.get(ATTR_TRANS_NETTARIF)
+            system_tarif = self.hass.states.get(ENTITY_ID).attribute.get(ATTR_SYSTEMTARIF)
+            elafgift = self.hass.states.get(ENTITY_ID).attribute.get(ATTR_ELAFGIFT)
+            hour_net_tarif = self.hass.states.get(ENTITY_ID).attribute.get(ATTR_HOUR_NETTARIF)
+
+            # Is this how to get?? self.hass.states.get(ENTITY_ID).attribute.get("ATTR_TARIFS")
+        all_fees_today = {
+            ATTR_TRANS_NETTARIF: trans_net_tarif,
+            ATTR_SYSTEMTARIF: system_tarif,
+            ATTR_ELAFGIFT: elafgift,
+            ATTR_HOUR_NETTARIF: hour_net_tarif
+        }
+
+        if self.day_before_summer_or_winter() == "summer":
+            all_fees_tomorrow = {
+                ATTR_TRANS_NETTARIF: CONF_DEFAULT_SUMMER_TARIFS[ATTR_TRANS_NETTARIF],
+                ATTR_SYSTEMTARIF: CONF_DEFAULT_SUMMER_TARIFS[ATTR_SYSTEMTARIF],
+                ATTR_ELAFGIFT: CONF_DEFAULT_SUMMER_TARIFS[ATTR_ELAFGIFT],
+                ATTR_HOUR_NETTARIF: CONF_DEFAULT_SUMMER_TARIFS[ATTR_HOUR_NETTARIF]
+            }
+        elif self.day_before_summer_or_winter() == "winter":
+            all_fees_tomorrow = {
+                ATTR_TRANS_NETTARIF: CONF_DEFAULT_WINTER_TARIFS[ATTR_TRANS_NETTARIF],
+                ATTR_SYSTEMTARIF: CONF_DEFAULT_WINTER_TARIFS[ATTR_SYSTEMTARIF],
+                ATTR_ELAFGIFT: CONF_DEFAULT_WINTER_TARIFS[ATTR_ELAFGIFT],
+                ATTR_HOUR_NETTARIF: CONF_DEFAULT_WINTER_TARIFS[ATTR_HOUR_NETTARIF]
+            }
+        else:
+            all_fees_tomorrow = all_fees_today
+
+        all_fees = {
+            ATTR_TODAY: all_fees_today,
+            ATTR_TOMORROW: all_fees_tomorrow
+        }
+
+        return all_fees
+
+    @staticmethod
+    def day_before_summer_or_winter() -> str:
+        """Determine if it is the day before tarifs change.
+        This happens on March 1st and October 1st."""
+
+        today_month = int(datetime.now().strftime("%m"))
+        tomorrow_month = int((datetime.now() + timedelta(days=1)).strftime("%m"))
+        
+        transition_to = "none"
+        
+        if today_month == 2 and tomorrow_month == 3:
+            transition_to = "summer"
+        elif today_month == 9 and tomorrow_month == 10:
+            transition_to = "winter"
+
+        return transition_to
+
+    def calculate_total(self, all_fees: dict[dict[str, str]]) -> dict[str, list[Any]]:
+        """Calculate all valuers for the sensor"""
+
+        raw_today_prices = self.hass.states.get(CONF_PRICE_SENSOR).attribute.get(ATTR_TODAY)
+        raw_tomorrow_prices = self.hass.states.get(CONF_PRICE_SENSOR).attribute.get(ATTR_TOMORROW)
+
+        fees_today = [all_fees[ATTR_TODAY][ATTR_HOUR_NETTARIF][i] + all_fees[ATTR_TODAY][ATTR_TRANS_NETTARIF] +
+                      all_fees[ATTR_TODAY][ATTR_SYSTEMTARIF] + all_fees[ATTR_TODAY][ATTR_ELAFGIFT] for i in
+                      range(len(all_fees[ATTR_TODAY][ATTR_HOUR_NETTARIF]))]
+
+        fees_tomorrow = [all_fees[ATTR_TOMORROW][ATTR_HOUR_NETTARIF][i] + all_fees[ATTR_TOMORROW][ATTR_TRANS_NETTARIF] +
+                         all_fees[ATTR_TOMORROW][ATTR_SYSTEMTARIF] + all_fees[ATTR_TOMORROW][ATTR_ELAFGIFT] for i in
+                         range(len(all_fees[ATTR_TOMORROW][ATTR_HOUR_NETTARIF]))]
+
+        total_today_prices = [raw_today_prices[i] + fees_today[i] for i in range(len(raw_today_prices))]
+
         try:
-            int(test_date_format_split)
-            if len(test_date_format_split) == 8:
-                format_of_date = "%Y%m%d"  # "YYYYMMDD"
-            elif len(test_date_format_split) == 6:
-                format_of_date = "%y%m%d"  # "yYMMDD"
-            elif len(test_date_format_split) == 4:
-                format_of_date = "%m%d"  # "MMDD"
-            elif len(test_date_format_split) == 2:
-                format_of_date = "%m"  # "MM"
-        except ValueError:
-            if len(test_date_format_split) != 3:  # To take into account "may" could be full month or 3 letter abbrev.
-                format_of_date = "%B"  # "month"
-            else:
-                if len(test_date_format.split("-")[1]) == 3:
-                    format_of_date = "%b"  # "mon"
-                else:
-                    format_of_date = "%B"  # "month"
+            total_tomorrow_prices = [raw_tomorrow_prices[i] + fees_tomorrow[i] for i in range(len(raw_tomorrow_prices))]
+        except TypeError:
+            total_tomorrow_prices = []
+        except IndexError:
+            total_tomorrow_prices = []
 
-        return format_of_date
+        total_prices: dict[str, list[Any]] = {
+            ATTR_TODAY: total_today_prices,
+            ATTR_TOMORROW: total_tomorrow_prices
+        }
 
-    def high_or_low_date_range(self, format_of_date: str) -> list[bool]:
-        """Determine whether we are in the high charge date range (typically winter)
-        or low charge date range (typically summer).
-        Takes into account numerous ways that this information could be input during setup.
-        Only uses "high fee dates", and assumes that re remaining are "low fee dates".
-        :return list[bool]
-        """
-        high_fee_date_range = [False, False]
-        high_fee_dates = self.config[CONF_HIGH_FEE_DATES].replace(" ", "")
-        high_fee_dates = [i for i in high_fee_dates.split(";")]
-        # low_fee_dates = self.config[CONF_LOW_FEE_DATES].replace(" ", "")
-        # low_fee_dates = [i for i in low_fee_dates.split(";")]
-        today = datetime.now()
-        # tomorrow = today + timedelta(days=1)
-        year_today = datetime.strftime(today, "%Y")
-        # month_today = datetime.strftime(today, "%m")
-        # date_today = datetime.strftime(today, "%d")
-        # year_tomorrow = datetime.strftime(tomorrow, "%Y")
-        # month_tomorrow = datetime.strftime(tomorrow, "%m")
-        # date_tomorrow = datetime.strftime(tomorrow, "%d")
-        start_dates: list[datetime] = []
-        end_dates: list[datetime] = []
+        return total_prices
 
-        for i in range(len(high_fee_dates)):
-            if format_of_date in ["%B", "%b"]:
-                start = datetime.strptime(high_fee_dates[i].split("-")[0].capitalize(), format_of_date)
-                end = datetime.strptime(high_fee_dates[i].split("-")[1].capitalize(), format_of_date)
-            elif format_of_date == "%Y%m%d":
-                start = datetime.strptime(high_fee_dates[i].split("-")[0], format_of_date)
-                end = datetime.strptime(high_fee_dates[i].split("-")[1], format_of_date)
-            elif format_of_date == "%y%m%d":
-                start = datetime.strptime(year_today + high_fee_dates[i].split("-")[0][2:], "%Y%m%d")
-                end = datetime.strptime(year_today + high_fee_dates[i].split("-")[1][2:], "%Y%m%d")
-            elif format_of_date == "%m%d":
-                start = datetime.strptime(year_today + high_fee_dates[i].split("-")[0], "%Y%m%d")
-                end = datetime.strptime(year_today + high_fee_dates[i].split("-")[1], "%Y%m%d")
-            else:  # format_of_date == "%m":
-                start = datetime.strptime(year_today + high_fee_dates[i].split("-")[0], "%Y%m")
-                end = datetime.strptime(year_today + high_fee_dates[i].split("-")[1], "%Y%m")
-            start_dates.append(start)
-            end_dates.append(end)
+    @staticmethod
+    def price_now(total_prices):
+        """Get the current price to use as the state"""
 
-        for i in range(len(start_dates)):
-            if start_dates[i] < today < end_dates[i]:
-                high_fee_date_range[0] = True
+        hour_now = int(datetime.now().strftime("%-H"))
+        state = total_prices[ATTR_TODAY][hour_now]
 
-        for i in range(len(start_dates)):
-            if start_dates[i] < today < end_dates[i]:
-                high_fee_date_range[1] = True
-
-        return high_fee_date_range
-
-    def get_time_slots(self, high_fee_date_range: list[bool]) -> tuple[list[float], list[float], float]:
-        """Determine the time slots for different fees for today and tomorrow"""
-
-        # Get all input time ranges, trim whitespaces and split them into a list (to account for several time ranges).
-        low_transport_hours: list[str] = [i for i in self.config[CONF_LOW_LOAD_TIMES].replace(" ", "").split(";")]
-        high_transport_hours: list[str] = [i for i in self.config[CONF_HIGH_LOAD_TIMES].replace(" ", "").split(";")]
-        peak_transport_hours: list[str] = [i for i in self.config[CONF_PEAK_LOAD_TIMES].replace(" ", "").split(";")]
-
-        # A list of all time ranges given as a list of two hours in 24h format (start and finish times)
-        low_transport_hours: list[list[str]] = [format_time_slots(i) for i in low_transport_hours]
-        high_transport_hours: list[list[str]] = [format_time_slots(i) for i in high_transport_hours]
-        peak_transport_hours: list[list[str]] = [format_time_slots(i) for i in peak_transport_hours]
-
-        # Get the low, high, and peak fees for today and tomorrow, based on the `high_fee_date_range`
-        if high_fee_date_range[0]:
-            today_low_fee: float = float(self.config[CONF_TRANSPORT_FEE_HIGH_DATES_LOW_LOAD])
-            today_high_fee: float = float(self.config[CONF_TRANSPORT_FEE_HIGH_DATES_HIGH_LOAD])
-            today_peak_fee: float = float(self.config[CONF_TRANSPORT_FEE_HIGH_DATES_PEAK_LOAD])
-        else:
-            today_low_fee: float = float(self.config[CONF_TRANSPORT_FEE_LOW_DATES_LOW_LOAD])
-            today_high_fee: float = float(self.config[CONF_TRANSPORT_FEE_LOW_DATES_HIGH_LOAD])
-            today_peak_fee: float = float(self.config[CONF_TRANSPORT_FEE_LOW_DATES_PEAK_LOAD])
-
-        if high_fee_date_range[1]:
-            tomorrow_low_fee: float = float(self.config[CONF_TRANSPORT_FEE_HIGH_DATES_LOW_LOAD])
-            tomorrow_high_fee: float = float(self.config[CONF_TRANSPORT_FEE_HIGH_DATES_HIGH_LOAD])
-            tomorrow_peak_fee: float = float(self.config[CONF_TRANSPORT_FEE_HIGH_DATES_PEAK_LOAD])
-        else:
-            tomorrow_low_fee: float = float(self.config[CONF_TRANSPORT_FEE_LOW_DATES_LOW_LOAD])
-            tomorrow_high_fee: float = float(self.config[CONF_TRANSPORT_FEE_LOW_DATES_HIGH_LOAD])
-            tomorrow_peak_fee: float = float(self.config[CONF_TRANSPORT_FEE_LOW_DATES_PEAK_LOAD])
-
-        # Create list for the 24 hours of the day today or tomorrow with the fees to add for each hour.
-        today_fees: list[float] = [
-            today_low_fee if any(
-                [
-                    int(low_transport_hours[i][0]) < int(CONST_HOURS[i]) < int(low_transport_hours[i][1]) for i in
-                    range(len(low_transport_hours))
-                ]
-            ) else
-            today_high_fee if any(
-                [
-                    int(high_transport_hours[i][0]) < int(CONST_HOURS[i]) < int(high_transport_hours[i][1]) for i in
-                    range(len(high_transport_hours))
-                ]
-            ) else
-            today_peak_fee if any(
-                [
-                    int(peak_transport_hours[i][0]) < int(CONST_HOURS[i]) < int(peak_transport_hours[i][1]) for i in
-                    range(len(peak_transport_hours))
-                ]
-            ) else
-            0.0 for j in range(24)
-        ]
-        tomorrow_fees: list[float] = [
-            tomorrow_low_fee if any(
-                [
-                    int(low_transport_hours[i][0]) < int(CONST_HOURS[i]) < int(low_transport_hours[i][1]) for i in
-                    range(len(low_transport_hours))
-                ]
-            ) else
-            tomorrow_high_fee if any(
-                [
-                    int(high_transport_hours[i][0]) < int(CONST_HOURS[i]) < int(high_transport_hours[i][1]) for i in
-                    range(len(high_transport_hours))
-                ]
-            ) else
-            tomorrow_peak_fee if any(
-                [
-                    int(peak_transport_hours[i][0]) < int(CONST_HOURS[i]) < int(peak_transport_hours[i][1]) for i in
-                    range(len(peak_transport_hours))
-                ]
-            ) else
-            0.0 for j in range(24)
-        ]
-
-        now_hour = int(datetime.strftime(datetime.now(), "%H"))
-        now_fee = today_fees[now_hour] + float(self.config[ATTR_TODAY][now_hour])
-
-        return today_fees, tomorrow_fees, now_fee
+        return state

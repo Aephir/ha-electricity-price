@@ -1,18 +1,28 @@
 {
   "config": {
     "error": {
-      "1": "Unknown error"
+      "invalid_eloverblik": "Invalid token or metering point",
+      "invalid_price_sensor": "Invalid price sensor entity ID"
     },
     "step": {
       "user": {
         "data": {
-          "address": "Address"
+          "price_sensor": "Price sensor entity ID"
         },
-        "description": "Enter your address, both street name, number, and postal code...",
-        "title": "Authentication"
+        "description": "Enter the price sensor",
+        "title": "Price sensor"
+      },
+      "eloverblik": {
+        "data": {
+          "eloverblik_token": "Eloverblik token",
+          "metering_point": "Metering point number"
+        },
+        "description": "Enter a token and metering point from eloverblik",
+        "title": "Eloverblik details"
       }
     },
     "abort": {
       "already_configured": "Device is already configured"
     }
   }
+}

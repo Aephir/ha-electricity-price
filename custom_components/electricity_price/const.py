@@ -43,6 +43,8 @@ CONF_TRANSPORT_LOW = "transport_low"
 CONF_TRANSPORT_HIGH = "transport_high"
 CONF_TRANSPORT_PEAK = "transport_peak"
 
+CONF_ELOVERBLIK_TOKEN = "eloverblik_token"
+CONF_METERING_POINT = "metering_point"
 CONF_PRICE_SENSOR = "price_sensor"
 
 ATTR_TODAY = "today"
@@ -59,6 +61,31 @@ ATTR_CURRENT_TAX = "current_tax"
 ATTR_CURRENT_ELECTRICITY_FEE = "current_electricity_fee"
 ATTR_STATE_CLASS = "state_class"
 ATTR_LAST_UPDATED = "last_updated"
+ATTR_ALL_TARIFS = "tarifs"
+ATTR_TRANS_NETTARIF = "transmissions_nettarif"
+ATTR_SYSTEMTARIF = "systemtarif"
+ATTR_ELAFGIFT = "elafgift"
+ATTR_HOUR_NETTARIF = "nettarif_c_time"
+
+CONF_DEFAULT_SUMMER_TARIFS = {
+    ATTR_TRANS_NETTARIF: 0.0,
+    ATTR_SYSTEMTARIF: 0.0,
+    ATTR_ELAFGIFT: 0.0,
+    ATTR_HOUR_NETTARIF: [
+        0
+    ]
+}
+CONF_DEFAULT_WINTER_TARIFS = {
+    ATTR_TRANS_NETTARIF: 0.0,
+    ATTR_SYSTEMTARIF: 0.0,
+    ATTR_ELAFGIFT: 0.0,
+    ATTR_HOUR_NETTARIF: [
+        0.1837, 0.1837, 0.1837, 0.1837, 0.1837, 0.1837,
+        0.5511, 0.5511, 0.5511, 0.5511, 0.5511, 0.5511,
+        0.5511, 0.5511, 0.5511, 0.5511, 0.5511, 1.6533,
+        1.6533, 1.6533, 1.6533, 0.5511, 0.5511, 0.5511
+    ]
+}
 
 CONST_HOURS = [
     "00",
