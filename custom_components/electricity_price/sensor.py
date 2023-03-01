@@ -31,6 +31,8 @@ from .const import (
     ENTITY_ID,
     ATTR_TODAY,
     ATTR_TOMORROW,
+    ATTR_TOTAL_TODAY,
+    ATTR_TOTAL_TOMORROW,
     ATTR_CURRENCY,
     ATTR_COUNTRY,
     ATTR_REGION,
@@ -138,6 +140,7 @@ class PriceSensor(Entity):
         TODO: Make the "Total today" and "Total tomorrow" attributes like Nordpool sensor has for easy ApexChart use"""
 
         all_fees, total_prices = self.get_sensor_data()
+        total_prices_with_times = self.parse_total_with_times(total_prices)
 
         # Is this how to get attributes from a Home Assistant entity_id (CONF_PRICE_SENSOR)?
         price_state = self.config[CONF_PRICE_SENSOR]
@@ -154,6 +157,8 @@ class PriceSensor(Entity):
         self.attrs[ATTR_STATE_CLASS] = attributes[ATTR_STATE_CLASS]
         self.attrs[ATTR_LAST_UPDATED] = last_updated()
         self.attrs[ATTR_ICON] = "mdi:flash"
+        self.attrs[ATTR_TOTAL_TODAY] = total_prices_with_times[ATTR_TODAY]
+        self.attrs[ATTR_TOTAL_TOMORROW] = total_prices_with_times[ATTR_TOMORROW]
 
         self._state = self.price_now(total_prices)
 
@@ -284,3 +289,39 @@ class PriceSensor(Entity):
         state = total_prices[ATTR_TODAY][hour_now]
 
         return state
+
+    def parse_total_with_times(self, total_prices) -> dict[str, list[dict[str, Any]]]:
+        """Parse total prices for an attribute compatible with nordpool sensor"""
+
+        today_values = total_prices[ATTR_TODAY]
+        tomorrow_values = total_prices[ATTR_TOMORROW]
+
+        string_times: list[str] = self.make_time_list()
+        today_times: list[str] = string_times[:25]
+        total_today = [{"start": today_times[i], "end": today_times[i + 1], "value": today_values[i]} for i in
+                       range(24)]
+        if all([len(tomorrow_values) == 24, tomorrow_values is not None,
+                len(tomorrow_values) > 0]):  # tomorrow_values[0] is not None]):
+            tomorrow_times = string_times[24:]
+            total_tomorrow = [{"start": tomorrow_times[i], "end": tomorrow_times[i + 1], "value": tomorrow_values[i]}
+                              for i in range(24)]
+        else:
+            total_tomorrow = []
+
+        total_prices_with_times: dict[str, list[dict[str, Any]]] = {
+            ATTR_TODAY: total_today,
+            ATTR_TOMORROW: total_tomorrow
+        }
+
+        return total_prices_with_times
+
+    @staticmethod
+    def make_time_list() -> list[str]:
+
+        format_of_datetime: str = "%H:%M:%S"
+        today_date = datetime.now().date()
+        today_midnight = datetime.combine(today_date, datetime.strptime("00:00:00", format_of_datetime).time())
+        today_from_midnight = [today_midnight + timedelta(hours=i) for i in range(49)]
+        string_times = [today_from_midnight[i].strftime("%Y-%m-%dT%H:%M:%S") for i in range(len(today_from_midnight))]
+
+        return string_times
