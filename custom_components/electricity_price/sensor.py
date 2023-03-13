@@ -15,6 +15,7 @@ from homeassistant.const import (
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_state_change
 from homeassistant.helpers.typing import (
     ConfigType,
     DiscoveryInfoType,
@@ -23,8 +24,6 @@ from homeassistant.helpers.typing import (
 import voluptuous as vol
 
 from .const import (
-    CONF_TAX,
-    CONF_CHARGE,
     CONF_PRICE_SENSOR,
     DOMAIN,
     NAME,
@@ -47,7 +46,6 @@ from .const import (
     CONF_DEFAULT_SUMMER_TARIFS,
     CONF_DEFAULT_WINTER_TARIFS,
 )
-from .validation_helpers import number_validation, percentage_validation
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -67,9 +65,9 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
 
 
 async def async_setup_entry(
-    hass: core.HomeAssistant,
-    config_entry: config_entries.ConfigEntry,
-    async_add_entities,
+        hass: core.HomeAssistant,
+        config_entry: config_entries.ConfigEntry,
+        async_add_entities
 ) -> None:
     """Setup sensors from a config entry created in the integrations UI."""
     config = hass.data[DOMAIN][config_entry.entry_id]
@@ -78,7 +76,7 @@ async def async_setup_entry(
         config.async_update()
     # session = async_get_clientsession(hass)
     raw_sensor = config[CONF_PRICE_SENSOR]
-    sensors = [PriceSensor(raw_sensor, config)]
+    sensors = [PriceSensor(hass, raw_sensor, config)]
     async_add_entities(sensors, update_before_add=True)
 
 
@@ -90,19 +88,22 @@ def setup_platform(
 ) -> None:
     """Set up the sensor platform."""
     raw_sensor = config[CONF_PRICE_SENSOR]
-    sensors = [PriceSensor(raw_sensor, config)]
+    sensors = [PriceSensor(hass, raw_sensor, config)]
     add_entities(sensors, update_before_add=True)
 
 
 def last_updated() -> str:
-    """Returns a string in the format of YYY-MM-DDTHH:MM:SS+HH:MM showing when the sensor was updated"""
+    """Returns a string in the format of YYY-MM-DDTHH:MM:SS+HH:MM showing when the sensor was updated
+    :rtype: object
+    """
     return datetime.strftime(datetime.now(), "%Y-%m-%dT%H:%M:%S") + "+01:00"
 
 
 class PriceSensor(Entity):
 
-    def __init__(self, raw_sensor: str, config):
+    def __init__(self, hass: HomeAssistantType, raw_sensor: str, config):
         super().__init__()
+        self.hass = hass
         self.raw_sensor = raw_sensor
         self.variable_cost: dict[str, list[float]] = {}
         self.attrs: dict[str, Any] = {CONF_NAME: NAME}

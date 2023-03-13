@@ -8,8 +8,6 @@ import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 
 from .const import (
-    CONF_TAX,
-    CONF_CHARGE,
     CONF_PRICE_SENSOR,
     DOMAIN,
     CONF_ELOVERBLIK_TOKEN,
@@ -61,7 +59,7 @@ async def async_validate_sensor(sensor: str, hass: HomeAssistant) -> None:
 
 async def validate_eloverblik(token, metering_point):
     """Try to log in and get the metering point at https://api.eloverblik.dk/CustomerApi/
-    Raises ValueError if it can't (typically meaning either token or metering point is wrong."""
+    Raises ValueError if it can't (typically meaning either token or metering point is wrong)."""
     client = Eloverblik(token)
     data = client.get_latest(metering_point)
 
@@ -107,8 +105,8 @@ class ElectricityPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_eloverblik"
             if not errors:
                 # Input is valid, set data.
-                self.data[CONF_ELOVERBLIK_TOKEN] = user_input[CONF_TAX]
-                self.data[CONF_METERING_POINT] = user_input[CONF_CHARGE]
+                self.data[CONF_ELOVERBLIK_TOKEN] = user_input[CONF_ELOVERBLIK_TOKEN]
+                self.data[CONF_METERING_POINT] = user_input[CONF_METERING_POINT]
                 return self.async_create_entry(title="Total Electricity Price", data=self.data)
 
         return self.async_show_form(
