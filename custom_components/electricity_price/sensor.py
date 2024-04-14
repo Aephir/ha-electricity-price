@@ -5,6 +5,7 @@ import json
 import logging
 from typing import Any
 from datetime import datetime, timedelta
+from pytz import timezone
 from homeassistant import config_entries, core
 from homeassistant.components.sensor import PLATFORM_SCHEMA
 from homeassistant.const import (
@@ -318,11 +319,15 @@ class PriceSensor(Entity):
 
     @staticmethod
     def make_time_list() -> list[str]:
-
-        format_of_datetime: str = "%H:%M:%S"
-        today_date = datetime.now().date()
-        today_midnight = datetime.combine(today_date, datetime.strptime("00:00:00", format_of_datetime).time())
+        """Make strings of times for the attributes "total_today" and "total_tomorrow"."""
+        copenhagen_tz = timezone('Europe/Copenhagen')
+        format_of_datetime = "%Y-%m-%dT%H:%M:%S%z"
+        now = datetime.now(copenhagen_tz)  # Current time in Copenhagen timezone
+        today_date = now.date()
+        today_midnight = copenhagen_tz.localize(datetime.combine(today_date, datetime.min.time()))
         today_from_midnight = [today_midnight + timedelta(hours=i) for i in range(49)]
-        string_times = [today_from_midnight[i].strftime("%Y-%m-%dT%H:%M:%S") for i in range(len(today_from_midnight))]
+
+        # Format times including the correct offset for Copenhagen considering DST
+        string_times = [dt.strftime(format_of_datetime) for dt in today_from_midnight]
 
         return string_times
