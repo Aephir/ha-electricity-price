@@ -13,7 +13,6 @@ from .const import (
     CONF_ELOVERBLIK_TOKEN,
     CONF_METERING_POINT,
 )
-# import validation_helpers as cv_helpers
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -43,9 +42,6 @@ async def async_validate_sensor(sensor: str, hass: HomeAssistant) -> None:
     except IndexError:
         raise IndexError
 
-    # entity_registry: EntityRegistry = async_get(hass)
-    # entities = entity_registry.entities
-    # entry: RegistryEntry = entities.get(sensor)
     price_state = hass.states.get(sensor)
     nordpool_attribute_keys = price_state.attributes.keys()
     check_attributes = [
@@ -73,9 +69,7 @@ class ElectricityPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     data: Optional[Dict[str, Any]]
 
     async def async_step_user(self, user_input: Optional[Dict[str, Any]] = None):
-        """Invoked when a user initiates a flow via the user interface.
-        Does the name have to be "async_step_user" to be invoked automatically?
-        """
+        """Handle the initial step."""
         errors: Dict[str, str] = {}
         device_unique_id = "total_electricity_price_per_hour"
         await self.async_set_unique_id(device_unique_id)
@@ -92,11 +86,11 @@ class ElectricityPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return await self.async_step_eloverblik()
 
         return self.async_show_form(
-            step_id="sensor", data_schema=SENSOR_SCHEMA, errors=errors
+            step_id="user", data_schema=SENSOR_SCHEMA, errors=errors
         )
 
     async def async_step_eloverblik(self, user_input: Optional[Dict[str, Any]] = None):
-        """Second step in config flow to add fixed charge and tax"""
+        """Second step in config flow to validate Eloverblik credentials."""
         errors: Dict[str, str] = {}
         if user_input is not None:
             try:
@@ -110,5 +104,5 @@ class ElectricityPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_create_entry(title="Total Electricity Price", data=self.data)
 
         return self.async_show_form(
-            step_id="fixed_charge", data_schema=ELOVERBLIK_SCHEMA, errors=errors
+            step_id="eloverblik", data_schema=ELOVERBLIK_SCHEMA, errors=errors
         )
