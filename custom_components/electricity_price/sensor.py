@@ -300,8 +300,9 @@ class PriceSensor(Entity):
 
         string_times: list[str] = self.make_time_list()
         today_times: list[str] = string_times[:25]
-        total_today = [{"start": today_times[i], "end": today_times[i + 1], "value": today_values[i]} for i in
-                       range(24)]
+        total_today = [{"time": today_times[i], "value": today_values[i]} for i in range(24)]
+        # total_today = [{"start": today_times[i], "end": today_times[i + 1], "value": today_values[i]} for i in
+        #                range(24)]
         if all([len(tomorrow_values) == 24, tomorrow_values is not None,
                 len(tomorrow_values) > 0]):  # tomorrow_values[0] is not None]):
             tomorrow_times = string_times[24:]
