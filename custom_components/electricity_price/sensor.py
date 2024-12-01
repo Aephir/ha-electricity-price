@@ -113,10 +113,10 @@ class PriceSensor(Entity):
         self.raw_sensor = raw_sensor
         self.variable_cost: dict[str, list[float]] = {}
         self.attrs: dict[str, Any] = {CONF_NAME: NAME}
-        self._name = ENTITY_ID
+        self._name = NAME
         self._state = None
         self._available = True
-        self._attr_unique_id = NAME
+        self._attr_unique_id = ENTITY_ID
         self.config = config
 
     @property

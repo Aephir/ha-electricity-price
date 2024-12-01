@@ -1,5 +1,5 @@
 DOMAIN = "electricity_price"
-NAME = "total_electricity_price"
+NAME = "Total Electricity Price"
 ENTITY_ID = "sensor.total_electricity_price"
 
 CONF_TAX = "tax"
@@ -49,8 +49,8 @@ CONF_PRICE_SENSOR = "price_sensor"
 
 ATTR_TODAY = "today"
 ATTR_TOMORROW = "tomorrow"
-ATTR_RAW_TODAY = "prices_today"
-ATTR_RAW_TOMORROW = "prices_tomorrow"
+ATTR_RAW_TODAY = "raw_today"
+ATTR_RAW_TOMORROW = "raw_tomorrow"
 ATTR_CURRENCY = "currency"
 ATTR_COUNTRY = "country"
 ATTR_REGION = "region"
