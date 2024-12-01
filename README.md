@@ -33,10 +33,10 @@ In order to add this Integration to Home Assistant, go to Settings and Integrati
 
 Now click the + button in the lower right corner, and then search for "Electricity Price". That should bring up the below screen:
 
-![Screenshot 2024-11-30 at 16.05.40.png](..%2F..%2F..%2F..%2F..%2F..%2FPictures%2FScreenshots%2FScreenshot%202024-11-30%20at%2016.05.40.png)
+<img width="387" alt="Screenshot 2024-11-30 at 16 05 40" src="https://github.com/user-attachments/assets/1b440994-327f-46b3-bebd-d87f8ba1661a">
 
 Insert the entity_id of the Nordpool sensor, e.g., `sensor.nordpool_kwh_dk2_dkk_3_10_0` and click "Submit" to get to this screen:
 
-![Screenshot 2024-11-30 at 16.05.59.png](..%2F..%2F..%2F..%2F..%2F..%2FPictures%2FScreenshots%2FScreenshot%202024-11-30%20at%2016.05.59.png)
+<img width="387" alt="Screenshot 2024-11-30 at 16 05 59" src="https://github.com/user-attachments/assets/c245e8d1-bbb5-47ca-92e2-f0747d99d4f3">
 
 Here you need to enter the API key generated at https://eloverblik.dk/ and your metering point, which can also be found there.
