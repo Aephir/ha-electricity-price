@@ -40,3 +40,4 @@ Insert the entity_id of the Nordpool sensor, e.g., `sensor.nordpool_kwh_dk2_dkk_
 <img width="387" alt="Screenshot 2024-11-30 at 16 05 59" src="https://github.com/user-attachments/assets/c245e8d1-bbb5-47ca-92e2-f0747d99d4f3">
 
 Here you need to enter the API key generated at https://eloverblik.dk/ and your metering point, which can also be found there.
+
