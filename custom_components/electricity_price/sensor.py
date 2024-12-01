@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pyeloverblik import Eloverblik
 import json
+import asyncio
 import logging
 from typing import Any
 from datetime import datetime, timedelta
@@ -22,7 +23,11 @@ from homeassistant.helpers.typing import (
     DiscoveryInfoType,
     HomeAssistantType,
 )
+from homeassistant.util.dt import get_time_zone
+from homeassistant.helpers.debounce import Debouncer
+from homeassistant.core import callback
 import voluptuous as vol
+from functools import partial
 
 from .const import (
     CONF_PRICE_SENSOR,
@@ -31,8 +36,8 @@ from .const import (
     ENTITY_ID,
     ATTR_TODAY,
     ATTR_TOMORROW,
-    ATTR_TOTAL_TODAY,
-    ATTR_TOTAL_TOMORROW,
+    ATTR_RAW_TODAY,
+    ATTR_RAW_TOMORROW,
     ATTR_CURRENCY,
     ATTR_COUNTRY,
     ATTR_REGION,
@@ -82,10 +87,10 @@ async def async_setup_entry(
 
 
 def setup_platform(
-    hass: HomeAssistantType,
-    config: ConfigType,
-    add_entities: AddEntitiesCallback,
-    discovery_info: DiscoveryInfoType | None = None,
+        hass: HomeAssistantType,
+        config: ConfigType,
+        add_entities: AddEntitiesCallback,
+        discovery_info: DiscoveryInfoType | None = None,
 ) -> None:
     """Set up the sensor platform."""
     raw_sensor = config[CONF_PRICE_SENSOR]
@@ -137,104 +142,144 @@ class PriceSensor(Entity):
     def extra_state_attributes(self) -> dict[str, Any]:
         return self.attrs
 
+    async def async_added_to_hass(self):
+        """Run when the entity is added to Home Assistant."""
+        await super().async_added_to_hass()
+
+        self._debouncer = Debouncer(
+            self.hass,
+            _LOGGER,
+            cooldown=0.1,  # 100ms cooldown to batch multiple triggers
+            immediate=True,  # Allow an immediate update on the first call
+        )
+
+        @callback
+        async def async_update_callback(entity_id, old_state, new_state):
+            """Update the sensor when the Nordpool sensor updates."""
+            if not new_state:
+                return
+
+            # Log the change for debugging
+            _LOGGER.debug(
+                "State or attributes changed for %s: %s -> %s",
+                entity_id,
+                old_state.attributes if old_state else None,
+                new_state.attributes if new_state else None,
+            )
+
+            # Schedule the debounced update
+            await self._debouncer.async_call()
+
+        # Track state changes for the Nordpool sensor
+        self.async_on_remove(
+            async_track_state_change(self.hass, self.config[CONF_PRICE_SENSOR], async_update_callback)
+        )
+
     async def async_update(self) -> None:
-        """Updates the sensor
-        TODO: Make the "Total today" and "Total tomorrow" attributes like Nordpool sensor has for easy ApexChart use"""
+        """Updates the sensor asynchronously."""
+        try:
+            tariffs = await self.fetch_tariffs()  # Fetch tariffs via Eloverblik
+            total_prices = await self.calculate_total(tariffs)
 
-        all_fees, total_prices = self.get_sensor_data()
-        total_prices_with_times = self.parse_total_with_times(total_prices)
+            # Get the current hour as an index for the state
+            current_hour = datetime.now().hour
+            self._state = total_prices[ATTR_TODAY][current_hour]  # Use the hourly price
 
-        # Is this how to get attributes from a Home Assistant entity_id (CONF_PRICE_SENSOR)?
-        price_state = self.config[CONF_PRICE_SENSOR]
-        attributes = price_state.attributes
+            # Populate attributes
+            self.attrs[ATTR_TODAY] = total_prices[ATTR_TODAY]
+            self.attrs[ATTR_TOMORROW] = total_prices[ATTR_TOMORROW]
+            self.attrs[ATTR_TRANS_NETTARIF] = tariffs.get("transmissions_nettarif", 0)
+            self.attrs[ATTR_SYSTEMTARIF] = tariffs.get("systemtarif", 0)
+            self.attrs[ATTR_ELAFGIFT] = tariffs.get("elafgift", 0)
+            self.attrs[ATTR_CURRENCY] = "DKK"
+            self.attrs[ATTR_COUNTRY] = "Denmark"
+            self.attrs[ATTR_REGION] = "DK2"
+            self.attrs[ATTR_STATE_CLASS] = "total"
+            self.attrs[ATTR_LAST_UPDATED] = datetime.now().isoformat()
+            self.attrs[ATTR_ICON] = "mdi:flash"
 
-        self.attrs[ATTR_TODAY] = total_prices[ATTR_TODAY]
-        self.attrs[ATTR_TOMORROW] = total_prices[ATTR_TOMORROW]
-        self.attrs[ATTR_TRANS_NETTARIF] = all_fees[ATTR_TODAY][ATTR_TRANS_NETTARIF]
-        self.attrs[ATTR_SYSTEMTARIF] = all_fees[ATTR_TODAY][ATTR_SYSTEMTARIF]
-        self.attrs[ATTR_ELAFGIFT] = all_fees[ATTR_TODAY][ATTR_ELAFGIFT]
-        self.attrs[ATTR_CURRENCY] = attributes[ATTR_CURRENCY]
-        self.attrs[ATTR_COUNTRY] = attributes[ATTR_COUNTRY]
-        self.attrs[ATTR_REGION] = attributes[ATTR_REGION]
-        self.attrs[ATTR_STATE_CLASS] = attributes[ATTR_STATE_CLASS]
-        self.attrs[ATTR_LAST_UPDATED] = last_updated()
-        self.attrs[ATTR_ICON] = "mdi:flash"
-        self.attrs[ATTR_TOTAL_TODAY] = total_prices_with_times[ATTR_TODAY]
-        self.attrs[ATTR_TOTAL_TOMORROW] = total_prices_with_times[ATTR_TOMORROW]
+            # Initialize dictionary to hold prices with timestamps
+            total_prices_with_times = {}
 
-        self._state = self.price_now(total_prices)
+            # Add start and end timestamps to total_prices
+            total_prices_with_times[ATTR_TODAY] = self.add_time_stamps(total_prices[ATTR_TODAY], "today")
+            total_prices_with_times[ATTR_TOMORROW] = self.add_time_stamps(total_prices[ATTR_TOMORROW], "tomorrow")
 
-    def get_sensor_data(self):
-        """Create all data for sensor"""
+            # Assign processed timestamps to attributes
+            self.attrs[ATTR_RAW_TODAY] = total_prices_with_times[ATTR_TODAY]
+            self.attrs[ATTR_RAW_TOMORROW] = total_prices_with_times[ATTR_TOMORROW]
 
-        all_fees = self.get_fees
-        total_prices = self.calculate_total(all_fees)
-        self._state = self.price_now(total_prices)
+            self._available = True
+        except Exception as e:
+            _LOGGER.error("Unexpected error in async_update: %s", e)
+            self._available = False
 
-        self.attrs[ATTR_TRANS_NETTARIF] = all_fees[ATTR_TRANS_NETTARIF]
-        self.attrs[ATTR_SYSTEMTARIF] = all_fees[ATTR_SYSTEMTARIF]
-        self.attrs[ATTR_ELAFGIFT] = all_fees[ATTR_ELAFGIFT]
-        self.attrs[ATTR_HOUR_NETTARIF] = all_fees[ATTR_HOUR_NETTARIF]
+    def add_time_stamps(self, prices: list, day: str) -> list:
+        """Attach timestamps to hourly prices with time zone awareness."""
+        # Get Home Assistant's configured time zone
+        tz = get_time_zone(self.hass.config.time_zone)
+        if not tz:
+            raise ValueError("Time zone could not be determined from Home Assistant configuration.")
 
+        base_date = datetime.now(tz)
+        if day == "tomorrow":
+            base_date += timedelta(days=1)
+
+        return [
+            {
+                "start": (base_date.replace(hour=i, minute=0, second=0, microsecond=0)).isoformat(),
+                "end": (base_date.replace(hour=i, minute=0, second=0, microsecond=0) + timedelta(hours=1)).isoformat(),
+                "value": price,
+            }
+            for i, price in enumerate(prices)
+        ]
+
+    async def fetch_tariffs(self) -> dict:
+        """Fetch tariffs from Eloverblik."""
+        try:
+            client = Eloverblik(self.config.get(CONF_ELOVERBLIK_TOKEN))
+            tariffs = await self.hass.async_add_executor_job(client.get_tariffs, self.config.get(CONF_METERING_POINT))
+            return tariffs.charges  # Extract charges dictionary
+        except Exception as e:
+            _LOGGER.error("Failed to fetch tariffs: %s", e)
+            return {}  # Return an empty dict to avoid crashing
+
+    async def async_get_sensor_data(self):
+        """Get sensor data asynchronously."""
+        all_fees = {}  # Placeholder for fee calculation logic
+        total_prices = await self.calculate_total(all_fees)  # Use await here
         return all_fees, total_prices
 
-    @property
-    def get_fees(self) -> dict[dict[str, str]]:
-        """Get fees from the eloverblik API.
-        Default to using the ones in the sensor attributes if unavailable.
-        TODO: Get both today and tomorrow fees.
-        """
-
+    async def async_get_fees(self):
+        """Get metering data from the Eloverblik API asynchronously."""
         _token = self.config[CONF_ELOVERBLIK_TOKEN]
         _metering_point = self.config[CONF_METERING_POINT]
 
-        client = Eloverblik(_token)
-        data = client.get_latest(_metering_point)
-        if int(data.status) == 200:
-            # {'transmissions_nettarif': 0.058, 'systemtarif': 0.054, 'elafgift': 0.008, 'nettarif_c_time': [0.1837, 0.1837, 0.1837, 0.1837, 0.1837, 0.1837, 0.5511, 0.5511, 0.5511, 0.5511, 0.5511, 0.5511, 0.5511, 0.5511, 0.5511, 0.5511, 0.5511, 1.6533, 1.6533, 1.6533, 1.6533, 0.5511, 0.5511, 0.5511]}
-            charges = json.loads(data.charges)
-            # Charges are in øre per Wh. Multiply by 1000 and divide by 100 (i.e., multiply by 10) to get DKK/kWh.
-            trans_net_tarif = float(charges[ATTR_TRANS_NETTARIF]) * 10
-            system_tarif = float(charges[ATTR_SYSTEMTARIF]) * 10
-            elafgift = float(charges[ATTR_ELAFGIFT]) * 10
-            hour_net_tarif = [float(i) * 10 for i in charges[ATTR_HOUR_NETTARIF]]
-        else:
-            trans_net_tarif = self.hass.states.get(ENTITY_ID).attribute.get(ATTR_TRANS_NETTARIF)
-            system_tarif = self.hass.states.get(ENTITY_ID).attribute.get(ATTR_SYSTEMTARIF)
-            elafgift = self.hass.states.get(ENTITY_ID).attribute.get(ATTR_ELAFGIFT)
-            hour_net_tarif = self.hass.states.get(ENTITY_ID).attribute.get(ATTR_HOUR_NETTARIF)
+        def fetch_metering_data():
+            client = Eloverblik(_token)
+            data = client.get_latest(_metering_point)
+            _LOGGER.debug("Eloverblik response: _status=%s, _metering_data=%s", data._status, data._metering_data)
+            if data._status != 200 or not data._metering_data:
+                raise ValueError("Invalid or empty response from Eloverblik API")
+            return data._metering_data
 
-            # Is this how to get?? self.hass.states.get(ENTITY_ID).attribute.get("ATTR_TARIFS")
-        all_fees_today = {
-            ATTR_TRANS_NETTARIF: trans_net_tarif,
-            ATTR_SYSTEMTARIF: system_tarif,
-            ATTR_ELAFGIFT: elafgift,
-            ATTR_HOUR_NETTARIF: hour_net_tarif
-        }
+        try:
+            # Fetch metering data asynchronously
+            metering_data = await self.hass.async_add_executor_job(fetch_metering_data)
 
-        if self.day_before_summer_or_winter() == "summer":
-            all_fees_tomorrow = {
-                ATTR_TRANS_NETTARIF: CONF_DEFAULT_SUMMER_TARIFS[ATTR_TRANS_NETTARIF],
-                ATTR_SYSTEMTARIF: CONF_DEFAULT_SUMMER_TARIFS[ATTR_SYSTEMTARIF],
-                ATTR_ELAFGIFT: CONF_DEFAULT_SUMMER_TARIFS[ATTR_ELAFGIFT],
-                ATTR_HOUR_NETTARIF: CONF_DEFAULT_SUMMER_TARIFS[ATTR_HOUR_NETTARIF]
+            # Process metering data (e.g., calculate totals, apply fees if needed)
+            # Example assumes metering_data represents hourly values in raw format.
+            hourly_costs = [value * 10 for value in metering_data]  # Example: Multiply by 10 for DKK/kWh
+
+            return {
+                ATTR_TODAY: hourly_costs,  # Adjust logic to split into today/tomorrow if needed
+                ATTR_TRANS_NETTARIF: 0,  # Placeholder if fees need to be added
+                ATTR_SYSTEMTARIF: 0,  # Placeholder for additional tarif data
+                ATTR_ELAFGIFT: 0  # Placeholder for taxes
             }
-        elif self.day_before_summer_or_winter() == "winter":
-            all_fees_tomorrow = {
-                ATTR_TRANS_NETTARIF: CONF_DEFAULT_WINTER_TARIFS[ATTR_TRANS_NETTARIF],
-                ATTR_SYSTEMTARIF: CONF_DEFAULT_WINTER_TARIFS[ATTR_SYSTEMTARIF],
-                ATTR_ELAFGIFT: CONF_DEFAULT_WINTER_TARIFS[ATTR_ELAFGIFT],
-                ATTR_HOUR_NETTARIF: CONF_DEFAULT_WINTER_TARIFS[ATTR_HOUR_NETTARIF]
-            }
-        else:
-            all_fees_tomorrow = all_fees_today
-
-        all_fees = {
-            ATTR_TODAY: all_fees_today,
-            ATTR_TOMORROW: all_fees_tomorrow
-        }
-
-        return all_fees
+        except Exception as e:
+            _LOGGER.error("Failed to get metering data: %s", e)
+            raise
 
     @staticmethod
     def day_before_summer_or_winter() -> str:
@@ -243,9 +288,9 @@ class PriceSensor(Entity):
 
         today_month = int(datetime.now().strftime("%m"))
         tomorrow_month = int((datetime.now() + timedelta(days=1)).strftime("%m"))
-        
+
         transition_to = "none"
-        
+
         if today_month == 2 and tomorrow_month == 3:
             transition_to = "summer"
         elif today_month == 9 and tomorrow_month == 10:
@@ -253,35 +298,66 @@ class PriceSensor(Entity):
 
         return transition_to
 
-    def calculate_total(self, all_fees: dict[dict[str, str]]) -> dict[str, list[Any]]:
-        """Calculate all valuers for the sensor"""
+    async def wait_for_sensor(self, sensor_id, timeout=30):
+        """Wait for a sensor to become available."""
+        for _ in range(timeout):
+            state = self.hass.states.get(sensor_id)
+            if state:
+                return state
+            _LOGGER.warning("Waiting for sensor '%s' to become available", sensor_id)
+            await asyncio.sleep(1)
+        _LOGGER.error("Sensor '%s' did not become available within %s seconds", sensor_id, timeout)
+        return None
 
-        raw_today_prices = self.hass.states.get(CONF_PRICE_SENSOR).attribute.get(ATTR_TODAY)
-        raw_tomorrow_prices = self.hass.states.get(CONF_PRICE_SENSOR).attribute.get(ATTR_TOMORROW)
+    async def calculate_total(self, tariffs):
+        """Calculate the total electricity prices, including fees and VAT."""
+        sensor_id = self.config.get(CONF_PRICE_SENSOR)
+        price_sensor_state = await self.wait_for_sensor(sensor_id)
 
-        fees_today = [all_fees[ATTR_TODAY][ATTR_HOUR_NETTARIF][i] + all_fees[ATTR_TODAY][ATTR_TRANS_NETTARIF] +
-                      all_fees[ATTR_TODAY][ATTR_SYSTEMTARIF] + all_fees[ATTR_TODAY][ATTR_ELAFGIFT] for i in
-                      range(len(all_fees[ATTR_TODAY][ATTR_HOUR_NETTARIF]))]
+        if price_sensor_state is None:
+            _LOGGER.error("Failed to fetch sensor '%s'. Skipping calculation.", sensor_id)
+            return {"today": [0] * 24, "tomorrow": [0] * 24}
 
-        fees_tomorrow = [all_fees[ATTR_TOMORROW][ATTR_HOUR_NETTARIF][i] + all_fees[ATTR_TOMORROW][ATTR_TRANS_NETTARIF] +
-                         all_fees[ATTR_TOMORROW][ATTR_SYSTEMTARIF] + all_fees[ATTR_TOMORROW][ATTR_ELAFGIFT] for i in
-                         range(len(all_fees[ATTR_TOMORROW][ATTR_HOUR_NETTARIF]))]
+        # Extract raw prices from the Nordpool sensor
+        raw_today_prices = price_sensor_state.attributes.get(ATTR_TODAY, [0] * 24)
+        raw_tomorrow_prices = price_sensor_state.attributes.get(ATTR_TOMORROW, [0] * 24)
 
-        total_today_prices = [raw_today_prices[i] + fees_today[i] for i in range(len(raw_today_prices))]
+        # Fixed fees
+        transmission_fee = tariffs.get("transmissions_nettarif", 0)
+        system_tariff = tariffs.get("systemtarif", 0)
+        electricity_tax = tariffs.get("elafgift", 0)
 
-        try:
-            total_tomorrow_prices = [raw_tomorrow_prices[i] + fees_tomorrow[i] for i in range(len(raw_tomorrow_prices))]
-        except TypeError:
-            total_tomorrow_prices = []
-        except IndexError:
-            total_tomorrow_prices = []
+        # Variable fees (hourly)
+        nettarif_c = tariffs.get("nettarif_c", [0] * 24)
 
-        total_prices: dict[str, list[Any]] = {
-            ATTR_TODAY: total_today_prices,
-            ATTR_TOMORROW: total_tomorrow_prices
+        # Calculate total prices with fees and VAT
+        total_today = [
+            round(
+                p + transmission_fee + system_tariff + electricity_tax + nettarif_c[i],
+                3,
+            )
+            for i, p in enumerate(raw_today_prices)
+        ]
+        total_tomorrow = [
+            round(
+                p + transmission_fee + system_tariff + electricity_tax + nettarif_c[i],
+                3,
+            )
+            for i, p in enumerate(raw_tomorrow_prices)
+        ]
+
+        # Add VAT (25%)
+        total_today = [round(price * 1.25, 3) for price in total_today]
+        total_tomorrow = [round(price * 1.25, 3) for price in total_tomorrow]
+
+        return {
+            ATTR_TODAY: total_today,
+            ATTR_TOMORROW: total_tomorrow,
+            "total_fees": {
+                "fixed": round(transmission_fee + system_tariff + electricity_tax, 3),
+                "variable": nettarif_c,
+            },
         }
-
-        return total_prices
 
     @staticmethod
     def price_now(total_prices):
