@@ -48,9 +48,6 @@ from .const import (
     ATTR_TRANS_NETTARIF,
     ATTR_SYSTEMTARIF,
     ATTR_ELAFGIFT,
-    ATTR_HOUR_NETTARIF,
-    CONF_DEFAULT_SUMMER_TARIFS,
-    CONF_DEFAULT_WINTER_TARIFS,
 )
 
 _LOGGER = logging.getLogger(__name__)
