@@ -46,6 +46,7 @@ CONF_PRICE_SENSOR = "price_sensor"
 
 ATTR_STATE_CLASS = "state_class"
 ATTR_AVERAGE = "average"
+ATTR_UNIT = "unit"
 ATTR_TODAY = "today"
 ATTR_TOMORROW = "tomorrow"
 ATTR_RAW_TODAY = "raw_today"

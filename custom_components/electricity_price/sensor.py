@@ -37,6 +37,7 @@ from .const import (
     ENTITY_ID,
     ATTR_STATE_CLASS,
     ATTR_AVERAGE,
+    ATTR_UNIT,
     ATTR_TODAY,
     ATTR_TOMORROW,
     ATTR_RAW_TODAY,
@@ -197,51 +198,54 @@ class PriceSensor(Entity):
             total_prices_with_times[ATTR_TOMORROW] = self.add_time_stamps(total_prices[ATTR_TOMORROW], "tomorrow")
 
             # Populate attributes
-            self.attrs = OrderedDict([
-                (self.attrs[ATTR_STATE_CLASS], "total"),
-                (self.attrs[ATTR_AVERAGE], round(sum(total_prices[ATTR_TODAY]) / len(total_prices[ATTR_TODAY]), 3) if total_prices[
-                    ATTR_TODAY] else None),
-                ("off_peak_1", None),  # Placeholder or actual calculation if available
-                ("off_peak_2", None),  # Placeholder or actual calculation if available
-                ("peak", None),  # Placeholder or actual calculation if available
-                ("min", min(total_prices[ATTR_TODAY]) if total_prices[ATTR_TODAY] else None),
-                ("max", max(total_prices[ATTR_TODAY]) if total_prices[ATTR_TODAY] else None),
-                ("mean", round(sum(total_prices[ATTR_TODAY]) / len(total_prices[ATTR_TODAY]), 3) if total_prices[
-                    ATTR_TODAY] else None),
-                ("unit", "kWh"),
-                (self.attrs[ATTR_CURRENCY], "DKK"),
-                (self.attrs[ATTR_COUNTRY], "Denmark"),
-                (self.attrs[ATTR_REGION], "DK2"),
-                ("low_price", None),  # Placeholder or actual calculation if available
-                ("price_percent_to_average", None),  # Placeholder or actual calculation if available
-                (self.attrs[ATTR_TODAY], total_prices[ATTR_TODAY]),
-                (self.attrs[ATTR_TOMORROW], total_prices[ATTR_TOMORROW]),
-                (self.attrs[ATTR_TOMORROW_VALID], tomorrow_valid),
-                (self.attrs[ATTR_RAW_TODAY], total_prices_with_times[ATTR_TODAY]),
-                (self.attrs[ATTR_RAW_TOMORROW], total_prices_with_times[ATTR_TOMORROW]),
-                (self.attrs[ATTR_TRANS_NETTARIF], self.tariffs.get("transmissions_nettarif", 0)),
-                (self.attrs[ATTR_SYSTEMTARIF], self.tariffs.get("systemtarif", 0)),
-                (self.attrs[ATTR_ELAFGIFT], self.tariffs.get("elafgift", 0)),
-                (self.attrs[ATTR_LAST_UPDATED], datetime.now().isoformat()),
-                (self.attrs[ATTR_ICON], "mdi:flash"),
-            ])
-            # self.attrs[ATTR_TODAY] = total_prices[ATTR_TODAY]
-            # self.attrs[ATTR_TOMORROW] = total_prices[ATTR_TOMORROW]
-            # self.attrs[ATTR_TOMORROW_VALID] = tomorrow_valid
-            # self.attrs[ATTR_TRANS_NETTARIF] = tariffs.get("transmissions_nettarif", 0)
-            # self.attrs[ATTR_SYSTEMTARIF] = tariffs.get("systemtarif", 0)
-            # self.attrs[ATTR_ELAFGIFT] = tariffs.get("elafgift", 0)
-            # self.attrs[ATTR_CURRENCY] = "DKK"
-            # self.attrs[ATTR_COUNTRY] = "Denmark"
-            # self.attrs[ATTR_REGION] = "DK2"
-            # self.attrs[ATTR_STATE_CLASS] = "total"
-            # self.attrs[ATTR_LAST_UPDATED] = datetime.now().isoformat()
-            # self.attrs[ATTR_ICON] = "mdi:flash"
-            # # Assign processed timestamps to attributes
-            # self.attrs[ATTR_RAW_TODAY] = total_prices_with_times[ATTR_TODAY]
-            # self.attrs[ATTR_RAW_TOMORROW] = total_prices_with_times[ATTR_TOMORROW]
+            # self.attrs = OrderedDict([
+            #
+            # ])
+            #     self.attrs[ATTR_STATE_CLASS], "total"),
+            #     self.attrs[ATTR_AVERAGE], round(sum(total_prices[ATTR_TODAY]) / len(total_prices[ATTR_TODAY]), 3) if total_prices[
+            #         ATTR_TODAY] else None),
+            #     ("off_peak_1", None),  # Placeholder or actual calculation if available
+            #     ("off_peak_2", None),  # Placeholder or actual calculation if available
+            #     ("peak", None),  # Placeholder or actual calculation if available
+            #     ("min", min(total_prices[ATTR_TODAY]) if total_prices[ATTR_TODAY] else None),
+            #     ("max", max(total_prices[ATTR_TODAY]) if total_prices[ATTR_TODAY] else None),
+            #     ("mean", round(sum(total_prices[ATTR_TODAY]) / len(total_prices[ATTR_TODAY]), 3) if total_prices[
+            #         ATTR_TODAY] else None),
+            #     ("unit", "kWh"),
+            #     (self.attrs[ATTR_CURRENCY], "DKK"),
+            #     (self.attrs[ATTR_COUNTRY], "Denmark"),
+            #     (self.attrs[ATTR_REGION], "DK2"),
+            #     ("low_price", None),  # Placeholder or actual calculation if available
+            #     ("price_percent_to_average", None),  # Placeholder or actual calculation if available
+            #     (self.attrs[ATTR_TODAY], total_prices[ATTR_TODAY]),
+            #     (self.attrs[ATTR_TOMORROW], total_prices[ATTR_TOMORROW]),
+            #     (self.attrs[ATTR_TOMORROW_VALID], tomorrow_valid),
+            #     (self.attrs[ATTR_RAW_TODAY], total_prices_with_times[ATTR_TODAY]),
+            #     (self.attrs[ATTR_RAW_TOMORROW], total_prices_with_times[ATTR_TOMORROW]),
+            #     (self.attrs[ATTR_TRANS_NETTARIF], self.tariffs.get("transmissions_nettarif", 0)),
+            #     (self.attrs[ATTR_SYSTEMTARIF], self.tariffs.get("systemtarif", 0)),
+            #     (self.attrs[ATTR_ELAFGIFT], self.tariffs.get("elafgift", 0)),
+            #     (self.attrs[ATTR_LAST_UPDATED], datetime.now().isoformat()),
+            #     (self.attrs[ATTR_ICON], "mdi:flash"),
+
+            self.attrs[ATTR_STATE_CLASS] = "total"
+            self.attrs[ATTR_UNIT] = "kWh"
+            self.attrs[ATTR_CURRENCY] = "DKK"
+            self.attrs[ATTR_COUNTRY] = "Denmark"
+            self.attrs[ATTR_REGION] = "DK2"
+            self.attrs[ATTR_TODAY] = total_prices[ATTR_TODAY]
+            self.attrs[ATTR_TOMORROW] = total_prices[ATTR_TOMORROW]
+            self.attrs[ATTR_TOMORROW_VALID] = tomorrow_valid
+            self.attrs[ATTR_RAW_TODAY] = total_prices_with_times[ATTR_TODAY]
+            self.attrs[ATTR_RAW_TOMORROW] = total_prices_with_times[ATTR_TOMORROW]
+            self.attrs[ATTR_TRANS_NETTARIF] = tariffs.get("transmissions_nettarif", 0)
+            self.attrs[ATTR_SYSTEMTARIF] = tariffs.get("systemtarif", 0)
+            self.attrs[ATTR_ELAFGIFT] = tariffs.get("elafgift", 0)
+            self.attrs[ATTR_LAST_UPDATED] = datetime.now().isoformat()
+            self.attrs[ATTR_ICON] = "mdi:flash"
 
             self._available = True
+
         except Exception as e:
             _LOGGER.error("Unexpected error in async_update: %s", e)
             self._available = False
