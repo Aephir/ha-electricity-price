@@ -7,8 +7,8 @@ This will create a sensor with similar information and layout as the sensor crea
 2. An API TOKEN and your metering point from Eloverblik (get here: https://eloverblik.dk/).
 
 ## NOTE
-1. As of November 2024, the underlying [pyeloverblik](https://github.com/JonasPed/pyeloverblik) is outdated. I have submitted a pull request to the owner. In the meantime, you can manually patch the installed version by making the changes suggested in [this comment](https://github.com/JonasPed/pyeloverblik/issues/26).
-2. I am most definitely not a programmer, so if any of the code is a bit clunky, feel free to suggest edits or submit a pull request.
+As of November 2024, the underlying [pyeloverblik](https://github.com/JonasPed/pyeloverblik) is outdated.
+I have submitted a pull request to the owner. In the meantime, you can manually patch the installed version by making the changes suggested in [this comment](https://github.com/JonasPed/pyeloverblik/issues/26).
 
 ## INSTALLATION
 ### HACS Installation (Recommended)
