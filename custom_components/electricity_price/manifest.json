@@ -8,5 +8,5 @@
   "name": "Electricity Price",
   "integration_type": "service",
   "requirements": ["pyeloverblik>=0.4.2"],
-  "version": "0.1.3"
+  "version": "0.1.4"
 }

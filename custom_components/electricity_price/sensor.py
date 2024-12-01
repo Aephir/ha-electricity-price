@@ -48,6 +48,7 @@ from .const import (
     ATTR_TRANS_NETTARIF,
     ATTR_SYSTEMTARIF,
     ATTR_ELAFGIFT,
+    ATTR_TOMORROW_VALID,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -182,9 +183,13 @@ class PriceSensor(Entity):
             current_hour = datetime.now().hour
             self._state = total_prices[ATTR_TODAY][current_hour]  # Use the hourly price
 
+            # Determine whether tomorrows prices are available.
+            tomorrow_valid = bool(total_prices[ATTR_TOMORROW])  # True if not empty, False otherwise
+
             # Populate attributes
             self.attrs[ATTR_TODAY] = total_prices[ATTR_TODAY]
             self.attrs[ATTR_TOMORROW] = total_prices[ATTR_TOMORROW]
+            self.attrs[ATTR_TOMORROW_VALID] = tomorrow_valid
             self.attrs[ATTR_TRANS_NETTARIF] = tariffs.get("transmissions_nettarif", 0)
             self.attrs[ATTR_SYSTEMTARIF] = tariffs.get("systemtarif", 0)
             self.attrs[ATTR_ELAFGIFT] = tariffs.get("elafgift", 0)
