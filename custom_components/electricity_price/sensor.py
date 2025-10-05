@@ -8,6 +8,7 @@ from collections import OrderedDict
 from typing import Any
 from datetime import datetime, timedelta
 from pytz import timezone
+from itertools import zip_longest
 from homeassistant import config_entries, core
 from homeassistant.components.sensor import PLATFORM_SCHEMA
 from homeassistant.const import (
@@ -183,9 +184,10 @@ class PriceSensor(Entity):
             tariffs = await self.fetch_tariffs()  # Fetch tariffs via Eloverblik
             total_prices = await self.calculate_total(tariffs)
 
-            # Get the current hour as an index for the state
-            current_hour = datetime.now().hour
-            self._state = total_prices[ATTR_TODAY][current_hour]  # Use the hourly price
+            # Get the current time (15 min interval) as an index for the state
+            now = datetime.now()
+            index = now.hour * 4 + now.minute // 15
+            self._state = total_prices[ATTR_TODAY][index]
 
             # Determine whether tomorrows prices are available.
             tomorrow_valid = bool(total_prices[ATTR_TOMORROW])  # True if not empty, False otherwise
@@ -263,8 +265,8 @@ class PriceSensor(Entity):
 
         return [
             {
-                "start": (base_date.replace(hour=i, minute=0, second=0, microsecond=0)).isoformat(),
-                "end": (base_date.replace(hour=i, minute=0, second=0, microsecond=0) + timedelta(hours=1)).isoformat(),
+                "start": (base_date.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(minutes=15 * i)).isoformat(),
+                "end": (base_date.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(minutes=15 * (i + 1))).isoformat(),
                 "value": price,
             }
             for i, price in enumerate(prices)
@@ -366,6 +368,14 @@ class PriceSensor(Entity):
         # Variable fees (hourly)
         nettarif_c = tariffs.get("nettarif_c", [0] * 24)
 
+        # Expand hourly tariff to 15-minute intervals if needed
+        if len(nettarif_c) == 24:
+            nettarif_c = [val for val in nettarif_c for _ in range(4)]
+
+        # Log lenght of prices
+        _LOGGER.warning("raw_today=%d raw_tomorrow=%d nettarif=%d",
+                len(raw_today_prices), len(raw_tomorrow_prices), len(nettarif_c))
+
         # Calculate total prices with fees and VAT
         total_today = [
             round(
@@ -405,42 +415,33 @@ class PriceSensor(Entity):
         return state
 
     def parse_total_with_times(self, total_prices) -> dict[str, list[dict[str, Any]]]:
-        """Parse total prices for an attribute compatible with nordpool sensor"""
+        """Parse total prices for an attribute compatible with Nordpool sensor in 15-min intervals."""
 
         today_values = total_prices[ATTR_TODAY]
         tomorrow_values = total_prices[ATTR_TOMORROW]
 
-        string_times: list[str] = self.make_time_list()
-        today_times: list[str] = string_times[:25]
-        total_today = [{"time": today_times[i], "value": today_values[i]} for i in range(24)]
-        # total_today = [{"start": today_times[i], "end": today_times[i + 1], "value": today_values[i]} for i in
-        #                range(24)]
-        if all([len(tomorrow_values) == 24, tomorrow_values is not None,
-                len(tomorrow_values) > 0]):  # tomorrow_values[0] is not None]):
-            tomorrow_times = string_times[24:]
-            total_tomorrow = [{"start": tomorrow_times[i], "end": tomorrow_times[i + 1], "value": tomorrow_values[i]}
-                              for i in range(24)]
-        else:
-            total_tomorrow = []
+        string_times = self.make_time_list()
+        today_times = string_times[:96]
+        tomorrow_times = string_times[96:]
 
-        total_prices_with_times: dict[str, list[dict[str, Any]]] = {
+        total_today = [{"time": today_times[i], "value": today_values[i]} for i in range(len(today_values))]
+        total_tomorrow = [{"time": tomorrow_times[i], "value": tomorrow_values[i]} for i in range(len(tomorrow_values))]
+
+        return {
             ATTR_TODAY: total_today,
             ATTR_TOMORROW: total_tomorrow
         }
 
-        return total_prices_with_times
-
     @staticmethod
     def make_time_list() -> list[str]:
-        """Make strings of times for the attributes "total_today" and "total_tomorrow"."""
+        """Make strings of times for the attributes "total_today" and "total_tomorrow" in 15-min intervals."""
         copenhagen_tz = timezone('Europe/Copenhagen')
         format_of_datetime = "%Y-%m-%dT%H:%M:%S%z"
-        now = datetime.now(copenhagen_tz)  # Current time in Copenhagen timezone
+        now = datetime.now(copenhagen_tz)
         today_date = now.date()
         today_midnight = copenhagen_tz.localize(datetime.combine(today_date, datetime.min.time()))
-        today_from_midnight = [today_midnight + timedelta(hours=i) for i in range(49)]
 
-        # Format times including the correct offset for Copenhagen considering DST
-        string_times = [dt.strftime(format_of_datetime) for dt in today_from_midnight]
+        total_points = 96 * 2  # 96 intervals today + 96 intervals tomorrow
+        time_list = [today_midnight + timedelta(minutes=15 * i) for i in range(total_points)]
 
-        return string_times
+        return [dt.strftime(format_of_datetime) for dt in time_list]
