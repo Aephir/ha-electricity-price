@@ -26,6 +26,7 @@ from homeassistant.helpers.typing import (
     HomeAssistantType,
 )
 from homeassistant.util.dt import get_time_zone
+from homeassistant.util import dt as dt_util
 from homeassistant.helpers.debounce import Debouncer
 from homeassistant.core import callback
 import voluptuous as vol
@@ -184,14 +185,6 @@ class PriceSensor(Entity):
             tariffs = await self.fetch_tariffs()  # Fetch tariffs via Eloverblik
             total_prices = await self.calculate_total(tariffs)
 
-            # Get the current time (15 min interval) as an index for the state
-            now = datetime.now()
-            index = now.hour * 4 + now.minute // 15
-            self._state = total_prices[ATTR_TODAY][index]
-
-            # Determine whether tomorrows prices are available.
-            tomorrow_valid = bool(total_prices[ATTR_TOMORROW])  # True if not empty, False otherwise
-
             # Initialize dictionary to hold prices with timestamps
             total_prices_with_times = {}
 
@@ -199,36 +192,26 @@ class PriceSensor(Entity):
             total_prices_with_times[ATTR_TODAY] = self.add_time_stamps(total_prices[ATTR_TODAY], "today")
             total_prices_with_times[ATTR_TOMORROW] = self.add_time_stamps(total_prices[ATTR_TOMORROW], "tomorrow")
 
+            # Get the current time and set the state based on the current interval
+            now = dt_util.now().astimezone()
+
+            matched = False
+            for entry in total_prices_with_times[ATTR_TODAY]:
+                start = datetime.fromisoformat(entry["start"])
+                end = datetime.fromisoformat(entry["end"])
+                if start <= now < end:
+                    self._state = entry["value"]
+                    matched = True
+                    break
+
+            if not matched:
+                _LOGGER.warning("No matching interval found for now=%s", now)
+                self._state = None
+
+            # Determine whether tomorrows prices are available.
+            tomorrow_valid = bool(total_prices[ATTR_TOMORROW])  # True if not empty, False otherwise
+
             # Populate attributes
-            # self.attrs = OrderedDict([
-            #
-            # ])
-            #     self.attrs[ATTR_STATE_CLASS], "total"),
-            #     self.attrs[ATTR_AVERAGE], round(sum(total_prices[ATTR_TODAY]) / len(total_prices[ATTR_TODAY]), 3) if total_prices[
-            #         ATTR_TODAY] else None),
-            #     ("off_peak_1", None),  # Placeholder or actual calculation if available
-            #     ("off_peak_2", None),  # Placeholder or actual calculation if available
-            #     ("peak", None),  # Placeholder or actual calculation if available
-            #     ("min", min(total_prices[ATTR_TODAY]) if total_prices[ATTR_TODAY] else None),
-            #     ("max", max(total_prices[ATTR_TODAY]) if total_prices[ATTR_TODAY] else None),
-            #     ("mean", round(sum(total_prices[ATTR_TODAY]) / len(total_prices[ATTR_TODAY]), 3) if total_prices[
-            #         ATTR_TODAY] else None),
-            #     ("unit", "kWh"),
-            #     (self.attrs[ATTR_CURRENCY], "DKK"),
-            #     (self.attrs[ATTR_COUNTRY], "Denmark"),
-            #     (self.attrs[ATTR_REGION], "DK2"),
-            #     ("low_price", None),  # Placeholder or actual calculation if available
-            #     ("price_percent_to_average", None),  # Placeholder or actual calculation if available
-            #     (self.attrs[ATTR_TODAY], total_prices[ATTR_TODAY]),
-            #     (self.attrs[ATTR_TOMORROW], total_prices[ATTR_TOMORROW]),
-            #     (self.attrs[ATTR_TOMORROW_VALID], tomorrow_valid),
-            #     (self.attrs[ATTR_RAW_TODAY], total_prices_with_times[ATTR_TODAY]),
-            #     (self.attrs[ATTR_RAW_TOMORROW], total_prices_with_times[ATTR_TOMORROW]),
-            #     (self.attrs[ATTR_TRANS_NETTARIF], self.tariffs.get("transmissions_nettarif", 0)),
-            #     (self.attrs[ATTR_SYSTEMTARIF], self.tariffs.get("systemtarif", 0)),
-            #     (self.attrs[ATTR_ELAFGIFT], self.tariffs.get("elafgift", 0)),
-            #     (self.attrs[ATTR_LAST_UPDATED], datetime.now().isoformat()),
-            #     (self.attrs[ATTR_ICON], "mdi:flash"),
 
             self.attrs[ATTR_STATE_CLASS] = "total"
             self.attrs[ATTR_UNIT] = "kWh"
