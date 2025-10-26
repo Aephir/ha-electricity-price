@@ -1,5 +1,6 @@
 {
   "name": "Electricity Price",
   "render_readme": true,
-  "iot_class": "calculated"
+  "iot_class": "calculated",
+  "icon": "https://raw.githubusercontent.com/Aephir/ha-electricity-price/main/custom_components/electricity_price/icon.png"
 }
