@@ -335,13 +335,25 @@ class PriceSensor(Entity):
         sensor_id = self.config.get(CONF_PRICE_SENSOR)
         price_sensor_state = await self.wait_for_sensor(sensor_id)
 
+        # Extract raw Nordpool prices (15‑min data)
+        raw_today_prices = price_sensor_state.attributes.get("today", [])
+        raw_tomorrow_prices = price_sensor_state.attributes.get("tomorrow", [])
+
+        # If these are nested dicts like [{'time': '...', 'value': 0.123}], flatten them
+        if raw_today_prices and isinstance(raw_today_prices[0], dict):
+            raw_today_prices = [p["value"] for p in raw_today_prices]
+        if raw_tomorrow_prices and isinstance(raw_tomorrow_prices[0], dict):
+            raw_tomorrow_prices = [p["value"] for p in raw_tomorrow_prices]
+
         if price_sensor_state is None:
             _LOGGER.error("Failed to fetch sensor '%s'. Skipping calculation.", sensor_id)
             return {"today": [0] * 24, "tomorrow": [0] * 24}
 
         # Extract raw prices from the Nordpool sensor
-        raw_today_prices = price_sensor_state.attributes.get(ATTR_TODAY, [0] * 24)
-        raw_tomorrow_prices = price_sensor_state.attributes.get(ATTR_TOMORROW, [0] * 24)
+        if len(raw_today_prices) not in (96, 100):
+            _LOGGER.warning("Unexpected number of raw_today_prices: %d (expected 96 or 100)", len(raw_today_prices))
+        if len(raw_tomorrow_prices) not in (0, 96, 100):
+            _LOGGER.warning("Unexpected number of raw_tomorrow_prices: %d (expected 0, 96 or 100)", len(raw_tomorrow_prices))
 
         # Fixed fees
         transmission_fee = tariffs.get("transmissions_nettarif", 0)
@@ -351,29 +363,36 @@ class PriceSensor(Entity):
         # Variable fees (hourly)
         nettarif_c = tariffs.get("nettarif_c", [0] * 24)
 
-        # Expand hourly tariff to 15-minute intervals if needed
+        # Expand nettarif_c to match the total number of intervals
+        total_intervals = len(raw_today_prices) + len(raw_tomorrow_prices)
         if len(nettarif_c) == 24:
             nettarif_c = [val for val in nettarif_c for _ in range(4)]
+        if len(nettarif_c) < total_intervals:
+            _LOGGER.warning("Padding nettarif_c from %d to %d intervals", len(nettarif_c), total_intervals)
+            nettarif_c.extend([0] * (total_intervals - len(nettarif_c)))
+        elif len(nettarif_c) > total_intervals:
+            _LOGGER.warning("Truncating nettarif_c from %d to %d intervals", len(nettarif_c), total_intervals)
+            nettarif_c = nettarif_c[:total_intervals]
 
         # Log lenght of prices
         _LOGGER.warning("raw_today=%d raw_tomorrow=%d nettarif=%d",
                 len(raw_today_prices), len(raw_tomorrow_prices), len(nettarif_c))
 
         # Calculate total prices with fees and VAT
-        total_today = [
-            round(
-                p + transmission_fee + system_tariff + electricity_tax + nettarif_c[i],
-                3,
-            )
-            for i, p in enumerate(raw_today_prices)
-        ]
-        total_tomorrow = [
-            round(
-                p + transmission_fee + system_tariff + electricity_tax + nettarif_c[i],
-                3,
-            )
-            for i, p in enumerate(raw_tomorrow_prices)
-        ]
+        total_today = []
+        for i, p in enumerate(raw_today_prices):
+            if i >= len(nettarif_c):
+                _LOGGER.error("Index %d out of range for nettarif_c (len=%d)", i, len(nettarif_c))
+                break
+            total_today.append(round(p + transmission_fee + system_tariff + electricity_tax + nettarif_c[i], 3))
+
+        total_tomorrow = []
+        for i, p in enumerate(raw_tomorrow_prices):
+            index = i + len(total_today)
+            if index >= len(nettarif_c):
+                _LOGGER.error("Index %d out of range for nettarif_c (len=%d)", index, len(nettarif_c))
+                break
+            total_tomorrow.append(round(p + transmission_fee + system_tariff + electricity_tax + nettarif_c[index], 3))
 
         # Add VAT (25%)
         total_today = [round(price * 1.25, 3) for price in total_today]
@@ -404,11 +423,14 @@ class PriceSensor(Entity):
         tomorrow_values = total_prices[ATTR_TOMORROW]
 
         string_times = self.make_time_list()
-        today_times = string_times[:96]
-        tomorrow_times = string_times[96:]
+        today_len = len(today_values)
+        tomorrow_len = len(tomorrow_values)
 
-        total_today = [{"time": today_times[i], "value": today_values[i]} for i in range(len(today_values))]
-        total_tomorrow = [{"time": tomorrow_times[i], "value": tomorrow_values[i]} for i in range(len(tomorrow_values))]
+        today_times = string_times[:today_len]
+        tomorrow_times = string_times[today_len:today_len + tomorrow_len]
+
+        total_today = [{"time": today_times[i], "value": today_values[i]} for i in range(today_len)]
+        total_tomorrow = [{"time": tomorrow_times[i], "value": tomorrow_values[i]} for i in range(tomorrow_len)]
 
         return {
             ATTR_TODAY: total_today,
@@ -424,7 +446,17 @@ class PriceSensor(Entity):
         today_date = now.date()
         today_midnight = copenhagen_tz.localize(datetime.combine(today_date, datetime.min.time()))
 
-        total_points = 96 * 2  # 96 intervals today + 96 intervals tomorrow
+        # Calculate the number of 15-min intervals for today and tomorrow, considering DST transitions
+        tomorrow_date = today_date + timedelta(days=1)
+        tomorrow_midnight = copenhagen_tz.localize(datetime.combine(tomorrow_date, datetime.min.time()))
+        after_tomorrow_date = tomorrow_date + timedelta(days=1)
+        after_tomorrow_midnight = copenhagen_tz.localize(datetime.combine(after_tomorrow_date, datetime.min.time()))
+
+        intervals_today = int((tomorrow_midnight - today_midnight).total_seconds() // (15 * 60))
+        intervals_tomorrow = int((after_tomorrow_midnight - tomorrow_midnight).total_seconds() // (15 * 60))
+
+        total_points = intervals_today + intervals_tomorrow
         time_list = [today_midnight + timedelta(minutes=15 * i) for i in range(total_points)]
 
+        # Return timestamp strings for all 15-min intervals covering today and tomorrow, accounting for DST
         return [dt.strftime(format_of_datetime) for dt in time_list]
