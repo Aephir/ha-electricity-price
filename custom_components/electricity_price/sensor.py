@@ -20,12 +20,6 @@ import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change
-from homeassistant.helpers.typing import (
-    ConfigType,
-    DiscoveryInfoType,
-    HomeAssistantType,
-)
-from homeassistant.util.dt import get_time_zone
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers.debounce import Debouncer
 from homeassistant.core import callback
@@ -91,10 +85,10 @@ async def async_setup_entry(
 
 
 def setup_platform(
-        hass: HomeAssistantType,
-        config: ConfigType,
+        hass: core.HomeAssistant,
+        config: dict[str, Any],
         add_entities: AddEntitiesCallback,
-        discovery_info: DiscoveryInfoType | None = None,
+        discovery_info: dict[str, Any] | None = None,
 ) -> None:
     """Set up the sensor platform."""
     raw_sensor = config[CONF_PRICE_SENSOR]
@@ -111,7 +105,7 @@ def last_updated() -> str:
 
 class PriceSensor(Entity):
 
-    def __init__(self, hass: HomeAssistantType, raw_sensor: str, config):
+    def __init__(self, hass: core.HomeAssistant, raw_sensor: str, config):
         super().__init__()
         self.hass = hass
         self.raw_sensor = raw_sensor
@@ -238,7 +232,7 @@ class PriceSensor(Entity):
     def add_time_stamps(self, prices: list, day: str) -> list:
         """Attach timestamps to hourly prices with time zone awareness."""
         # Get Home Assistant's configured time zone
-        tz = get_time_zone(self.hass.config.time_zone)
+        tz = timezone(self.hass.config.time_zone)
         if not tz:
             raise ValueError("Time zone could not be determined from Home Assistant configuration.")
 

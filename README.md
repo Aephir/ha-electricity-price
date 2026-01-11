@@ -6,10 +6,6 @@ This will create a sensor with similar information and layout as the sensor crea
 1. The "Nordpool" custom integration set up (https://github.com/custom-components/nordpool/).
 2. An API TOKEN and your metering point from Eloverblik (get here: https://eloverblik.dk/).
 
-## NOTE
-As of November 2024, the underlying [pyeloverblik](https://github.com/JonasPed/pyeloverblik) is outdated.
-I have submitted a pull request to the owner. In the meantime, you can manually patch the installed version by making the changes suggested in [this comment](https://github.com/JonasPed/pyeloverblik/issues/26).
-
 ## INSTALLATION
 ### HACS Installation (Recommended)
 
