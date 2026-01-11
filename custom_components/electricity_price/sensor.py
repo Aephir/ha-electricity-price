@@ -1,30 +1,23 @@
 from __future__ import annotations
 
-from pyeloverblik import Eloverblik
-import json
 import asyncio
 import logging
-from collections import OrderedDict
 from typing import Any
 from datetime import datetime, timedelta
 from pytz import timezone
-from itertools import zip_longest
+
+from pyeloverblik import Eloverblik
+import voluptuous as vol
+
 from homeassistant import config_entries, core
-from homeassistant.components.sensor import PLATFORM_SCHEMA
-from homeassistant.const import (
-    CONF_NAME,
-    ATTR_ICON
-)
-# from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.components.sensor import PLATFORM_SCHEMA, SensorDeviceClass
+from homeassistant.const import CONF_NAME, UnitOfEnergy
 import homeassistant.helpers.config_validation as cv
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_state_change
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers.debounce import Debouncer
-from homeassistant.core import callback
-import voluptuous as vol
-from functools import partial
 
 from .const import (
     CONF_PRICE_SENSOR,
@@ -41,7 +34,6 @@ from .const import (
     ATTR_CURRENCY,
     ATTR_COUNTRY,
     ATTR_REGION,
-    ATTR_STATE_CLASS,
     ATTR_LAST_UPDATED,
     CONF_ELOVERBLIK_TOKEN,
     CONF_METERING_POINT,
@@ -49,14 +41,13 @@ from .const import (
     ATTR_SYSTEMTARIF,
     ATTR_ELAFGIFT,
     ATTR_TOMORROW_VALID,
+    CURRENCY,
+    COUNTRY,
+    ICON,
 )
 
 _LOGGER = logging.getLogger(__name__)
 
-# Time between updating data
-# I should see if it can subscribe to changes in Nordpool sensor instead.
-# https://developers.home-assistant.io/docs/integration_listen_events#tracking-entity-state-changes
-# Maybe async_track_state_change ??
 SCAN_INTERVAL = timedelta(minutes=10)
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
@@ -96,13 +87,6 @@ def setup_platform(
     add_entities(sensors, update_before_add=True)
 
 
-def last_updated() -> str:
-    """Returns a string in the format of YYY-MM-DDTHH:MM:SS+HH:MM showing when the sensor was updated
-    :rtype: object
-    """
-    return datetime.strftime(datetime.now(), "%Y-%m-%dT%H:%M:%S") + "+01:00"
-
-
 class PriceSensor(Entity):
 
     def __init__(self, hass: core.HomeAssistant, raw_sensor: str, config):
@@ -137,6 +121,21 @@ class PriceSensor(Entity):
         return self._state
 
     @property
+    def unit_of_measurement(self) -> str:
+        """Return the unit of measurement."""
+        return f"{CURRENCY}/kWh"
+
+    @property
+    def icon(self) -> str:
+        """Return the icon to use in the frontend."""
+        return ICON
+
+    @property
+    def device_class(self) -> SensorDeviceClass | None:
+        """Return the device class of the sensor."""
+        return SensorDeviceClass.MONETARY
+
+    @property
     def extra_state_attributes(self) -> dict[str, Any]:
         return self.attrs
 
@@ -151,7 +150,6 @@ class PriceSensor(Entity):
             immediate=True,  # Allow an immediate update on the first call
         )
 
-        @callback
         async def async_update_callback(entity_id, old_state, new_state):
             """Update the sensor when the Nordpool sensor updates."""
             if not new_state:
@@ -205,13 +203,16 @@ class PriceSensor(Entity):
             # Determine whether tomorrows prices are available.
             tomorrow_valid = bool(total_prices[ATTR_TOMORROW])  # True if not empty, False otherwise
 
-            # Populate attributes
+            # Get region from the price sensor
+            price_sensor_state = self.hass.states.get(self.config[CONF_PRICE_SENSOR])
+            region = price_sensor_state.attributes.get("region", "DK2") if price_sensor_state else "DK2"
 
+            # Populate attributes
             self.attrs[ATTR_STATE_CLASS] = "total"
             self.attrs[ATTR_UNIT] = "kWh"
-            self.attrs[ATTR_CURRENCY] = "DKK"
-            self.attrs[ATTR_COUNTRY] = "Denmark"
-            self.attrs[ATTR_REGION] = "DK2"
+            self.attrs[ATTR_CURRENCY] = CURRENCY
+            self.attrs[ATTR_COUNTRY] = COUNTRY
+            self.attrs[ATTR_REGION] = region
             self.attrs[ATTR_TODAY] = total_prices[ATTR_TODAY]
             self.attrs[ATTR_TOMORROW] = total_prices[ATTR_TOMORROW]
             self.attrs[ATTR_TOMORROW_VALID] = tomorrow_valid
@@ -221,7 +222,6 @@ class PriceSensor(Entity):
             self.attrs[ATTR_SYSTEMTARIF] = tariffs.get("systemtarif", 0)
             self.attrs[ATTR_ELAFGIFT] = tariffs.get("elafgift", 0)
             self.attrs[ATTR_LAST_UPDATED] = datetime.now().isoformat()
-            self.attrs[ATTR_ICON] = "mdi:flash"
 
             self._available = True
 
@@ -233,8 +233,6 @@ class PriceSensor(Entity):
         """Attach timestamps to hourly prices with time zone awareness."""
         # Get Home Assistant's configured time zone
         tz = timezone(self.hass.config.time_zone)
-        if not tz:
-            raise ValueError("Time zone could not be determined from Home Assistant configuration.")
 
         base_date = datetime.now(tz)
         if day == "tomorrow":
@@ -258,60 +256,6 @@ class PriceSensor(Entity):
         except Exception as e:
             _LOGGER.error("Failed to fetch tariffs: %s", e)
             return {}  # Return an empty dict to avoid crashing
-
-    async def async_get_sensor_data(self):
-        """Get sensor data asynchronously."""
-        all_fees = {}  # Placeholder for fee calculation logic
-        total_prices = await self.calculate_total(all_fees)  # Use await here
-        return all_fees, total_prices
-
-    async def async_get_fees(self):
-        """Get metering data from the Eloverblik API asynchronously."""
-        _token = self.config[CONF_ELOVERBLIK_TOKEN]
-        _metering_point = self.config[CONF_METERING_POINT]
-
-        def fetch_metering_data():
-            client = Eloverblik(_token)
-            data = client.get_latest(_metering_point)
-            _LOGGER.debug("Eloverblik response: _status=%s, _metering_data=%s", data._status, data._metering_data)
-            if data._status != 200 or not data._metering_data:
-                raise ValueError("Invalid or empty response from Eloverblik API")
-            return data._metering_data
-
-        try:
-            # Fetch metering data asynchronously
-            metering_data = await self.hass.async_add_executor_job(fetch_metering_data)
-
-            # Process metering data (e.g., calculate totals, apply fees if needed)
-            # Example assumes metering_data represents hourly values in raw format.
-            hourly_costs = [value * 10 for value in metering_data]  # Example: Multiply by 10 for DKK/kWh
-
-            return {
-                ATTR_TODAY: hourly_costs,  # Adjust logic to split into today/tomorrow if needed
-                ATTR_TRANS_NETTARIF: 0,  # Placeholder if fees need to be added
-                ATTR_SYSTEMTARIF: 0,  # Placeholder for additional tarif data
-                ATTR_ELAFGIFT: 0  # Placeholder for taxes
-            }
-        except Exception as e:
-            _LOGGER.error("Failed to get metering data: %s", e)
-            raise
-
-    @staticmethod
-    def day_before_summer_or_winter() -> str:
-        """Determine if it is the day before tarifs change.
-        This happens on March 1st and October 1st."""
-
-        today_month = int(datetime.now().strftime("%m"))
-        tomorrow_month = int((datetime.now() + timedelta(days=1)).strftime("%m"))
-
-        transition_to = "none"
-
-        if today_month == 2 and tomorrow_month == 3:
-            transition_to = "summer"
-        elif today_month == 9 and tomorrow_month == 10:
-            transition_to = "winter"
-
-        return transition_to
 
     async def wait_for_sensor(self, sensor_id, timeout=30):
         """Wait for a sensor to become available."""
@@ -400,57 +344,3 @@ class PriceSensor(Entity):
                 "variable": nettarif_c,
             },
         }
-
-    @staticmethod
-    def price_now(total_prices):
-        """Get the current price to use as the state"""
-
-        hour_now = int(datetime.now().strftime("%-H"))
-        state = total_prices[ATTR_TODAY][hour_now]
-
-        return state
-
-    def parse_total_with_times(self, total_prices) -> dict[str, list[dict[str, Any]]]:
-        """Parse total prices for an attribute compatible with Nordpool sensor in 15-min intervals."""
-
-        today_values = total_prices[ATTR_TODAY]
-        tomorrow_values = total_prices[ATTR_TOMORROW]
-
-        string_times = self.make_time_list()
-        today_len = len(today_values)
-        tomorrow_len = len(tomorrow_values)
-
-        today_times = string_times[:today_len]
-        tomorrow_times = string_times[today_len:today_len + tomorrow_len]
-
-        total_today = [{"time": today_times[i], "value": today_values[i]} for i in range(today_len)]
-        total_tomorrow = [{"time": tomorrow_times[i], "value": tomorrow_values[i]} for i in range(tomorrow_len)]
-
-        return {
-            ATTR_TODAY: total_today,
-            ATTR_TOMORROW: total_tomorrow
-        }
-
-    @staticmethod
-    def make_time_list() -> list[str]:
-        """Make strings of times for the attributes "total_today" and "total_tomorrow" in 15-min intervals."""
-        copenhagen_tz = timezone('Europe/Copenhagen')
-        format_of_datetime = "%Y-%m-%dT%H:%M:%S%z"
-        now = datetime.now(copenhagen_tz)
-        today_date = now.date()
-        today_midnight = copenhagen_tz.localize(datetime.combine(today_date, datetime.min.time()))
-
-        # Calculate the number of 15-min intervals for today and tomorrow, considering DST transitions
-        tomorrow_date = today_date + timedelta(days=1)
-        tomorrow_midnight = copenhagen_tz.localize(datetime.combine(tomorrow_date, datetime.min.time()))
-        after_tomorrow_date = tomorrow_date + timedelta(days=1)
-        after_tomorrow_midnight = copenhagen_tz.localize(datetime.combine(after_tomorrow_date, datetime.min.time()))
-
-        intervals_today = int((tomorrow_midnight - today_midnight).total_seconds() // (15 * 60))
-        intervals_tomorrow = int((after_tomorrow_midnight - tomorrow_midnight).total_seconds() // (15 * 60))
-
-        total_points = intervals_today + intervals_tomorrow
-        time_list = [today_midnight + timedelta(minutes=15 * i) for i in range(total_points)]
-
-        # Return timestamp strings for all 15-min intervals covering today and tomorrow, accounting for DST
-        return [dt.strftime(format_of_datetime) for dt in time_list]

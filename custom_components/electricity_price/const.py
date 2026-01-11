@@ -66,3 +66,8 @@ ATTR_SYSTEMTARIF = "systemtarif"
 ATTR_ELAFGIFT = "elafgift"
 ATTR_HOUR_NETTARIF = "nettarif_c_time"
 ATTR_TOMORROW_VALID = "tomorrow_valid"
+
+# Default values
+CURRENCY = "DKK"
+COUNTRY = "Denmark"
+ICON = "mdi:flash"
