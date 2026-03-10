@@ -148,6 +148,7 @@ class PriceSensor(Entity):
             _LOGGER,
             cooldown=0.1,  # 100ms cooldown to batch multiple triggers
             immediate=True,  # Allow an immediate update on the first call
+            function=self.async_update,  # The function to call when debouncer triggers
         )
 
         async def async_update_callback(entity_id, old_state, new_state):
