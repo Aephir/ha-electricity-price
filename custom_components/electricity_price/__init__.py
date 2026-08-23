@@ -1,9 +1,9 @@
-import asyncio
 import logging
 
 from homeassistant import config_entries, core
 
-from .const import DOMAIN
+from .const import CONF_ELOVERBLIK_TOKEN, CONF_METERING_POINT, DOMAIN
+from .coordinator import TariffCoordinator
 
 PLATFORMS: list[str] = ["sensor"]
 
@@ -17,6 +17,15 @@ async def async_setup_entry(
     """Set up platform from a ConfigEntry."""
     hass.data.setdefault(DOMAIN, {})
     hass_data = dict(entry.data)
+
+    coordinator = TariffCoordinator(
+        hass,
+        entry.data.get(CONF_ELOVERBLIK_TOKEN),
+        entry.data.get(CONF_METERING_POINT),
+    )
+    await coordinator.async_config_entry_first_refresh()
+    hass_data["coordinator"] = coordinator
+
     # Registers update listener to update config entry when options are updated.
     unsub_options_update_listener = entry.add_update_listener(options_update_listener)
     # Store a reference to the unsubscribe function to clean up if an entry is unloaded.

@@ -1,21 +1,16 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 from typing import Any
 from datetime import datetime, timedelta
-from pytz import timezone
-
-from pyeloverblik import Eloverblik
-import voluptuous as vol
 
 from homeassistant import config_entries, core
-from homeassistant.components.sensor import PLATFORM_SCHEMA, SensorDeviceClass
-from homeassistant.const import CONF_NAME, UnitOfEnergy
-import homeassistant.helpers.config_validation as cv
+from homeassistant.components.sensor import SensorDeviceClass
+from homeassistant.const import CONF_NAME
+from homeassistant.core import callback
 from homeassistant.helpers.entity import Entity
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.event import async_track_state_change
+from homeassistant.helpers.event import async_track_state_change_event
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 from homeassistant.helpers.debounce import Debouncer
 
@@ -25,7 +20,6 @@ from .const import (
     NAME,
     ENTITY_ID,
     ATTR_STATE_CLASS,
-    ATTR_AVERAGE,
     ATTR_UNIT,
     ATTR_TODAY,
     ATTR_TOMORROW,
@@ -35,8 +29,6 @@ from .const import (
     ATTR_COUNTRY,
     ATTR_REGION,
     ATTR_LAST_UPDATED,
-    CONF_ELOVERBLIK_TOKEN,
-    CONF_METERING_POINT,
     ATTR_TRANS_NETTARIF,
     ATTR_SYSTEMTARIF,
     ATTR_ELAFGIFT,
@@ -45,18 +37,9 @@ from .const import (
     COUNTRY,
     ICON,
 )
+from .coordinator import TariffCoordinator
 
 _LOGGER = logging.getLogger(__name__)
-
-SCAN_INTERVAL = timedelta(minutes=10)
-
-PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend(
-    {
-        vol.Required(CONF_PRICE_SENSOR): cv.entity_id,
-        vol.Optional(CONF_ELOVERBLIK_TOKEN): cv.string,
-        vol.Optional(CONF_METERING_POINT): cv.string,
-    }
-)
 
 
 async def async_setup_entry(
@@ -66,31 +49,16 @@ async def async_setup_entry(
 ) -> None:
     """Setup sensors from a config entry created in the integrations UI."""
     config = hass.data[DOMAIN][config_entry.entry_id]
-    # Update our config to include new repos and remove those that have been removed.
-    if config_entry.options:
-        config.async_update()
-    # session = async_get_clientsession(hass)
+    coordinator: TariffCoordinator = config["coordinator"]
     raw_sensor = config[CONF_PRICE_SENSOR]
-    sensors = [PriceSensor(hass, raw_sensor, config)]
-    async_add_entities(sensors, update_before_add=True)
+    sensors = [PriceSensor(hass, raw_sensor, config, coordinator)]
+    async_add_entities(sensors)
 
 
-def setup_platform(
-        hass: core.HomeAssistant,
-        config: dict[str, Any],
-        add_entities: AddEntitiesCallback,
-        discovery_info: dict[str, Any] | None = None,
-) -> None:
-    """Set up the sensor platform."""
-    raw_sensor = config[CONF_PRICE_SENSOR]
-    sensors = [PriceSensor(hass, raw_sensor, config)]
-    add_entities(sensors, update_before_add=True)
+class PriceSensor(CoordinatorEntity[TariffCoordinator], Entity):
 
-
-class PriceSensor(Entity):
-
-    def __init__(self, hass: core.HomeAssistant, raw_sensor: str, config):
-        super().__init__()
+    def __init__(self, hass: core.HomeAssistant, raw_sensor: str, config, coordinator: TariffCoordinator):
+        super().__init__(coordinator)
         self.hass = hass
         self.raw_sensor = raw_sensor
         self.variable_cost: dict[str, list[float]] = {}
@@ -141,41 +109,43 @@ class PriceSensor(Entity):
 
     async def async_added_to_hass(self):
         """Run when the entity is added to Home Assistant."""
-        await super().async_added_to_hass()
+        await super().async_added_to_hass()  # Subscribes to coordinator (tariff) updates
 
         self._debouncer = Debouncer(
             self.hass,
             _LOGGER,
-            cooldown=0.1,  # 100ms cooldown to batch multiple triggers
-            immediate=True,  # Allow an immediate update on the first call
-            function=self.async_update,  # The function to call when debouncer triggers
+            cooldown=2,  # Collapse bursts of Nordpool attribute updates
+            immediate=True,  # Allow an immediate recompute on the first call
+            function=self._async_recompute,
         )
 
-        async def async_update_callback(entity_id, old_state, new_state):
-            """Update the sensor when the Nordpool sensor updates."""
+        async def async_update_callback(event) -> None:
+            """Recompute the price when the Nordpool sensor updates."""
+            new_state = event.data.get("new_state")
             if not new_state:
                 return
 
-            # Log the change for debugging
-            _LOGGER.debug(
-                "State or attributes changed for %s: %s -> %s",
-                entity_id,
-                old_state.attributes if old_state else None,
-                new_state.attributes if new_state else None,
-            )
+            _LOGGER.debug("State changed for %s: %s", event.data.get("entity_id"), new_state.attributes)
 
-            # Schedule the debounced update
+            # Schedule the debounced recompute
             await self._debouncer.async_call()
 
         # Track state changes for the Nordpool sensor
         self.async_on_remove(
-            async_track_state_change(self.hass, self.config[CONF_PRICE_SENSOR], async_update_callback)
+            async_track_state_change_event(self.hass, self.config[CONF_PRICE_SENSOR], async_update_callback)
         )
 
-    async def async_update(self) -> None:
-        """Updates the sensor asynchronously."""
+        await self._async_recompute()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Recompute the price when the coordinator has fresh tariffs."""
+        self.hass.async_create_task(self._async_recompute())
+
+    async def _async_recompute(self) -> None:
+        """Recalculate the sensor state from the cached tariffs and the latest Nordpool prices."""
         try:
-            tariffs = await self.fetch_tariffs()  # Fetch tariffs via Eloverblik
+            tariffs = self.coordinator.data or {}
             total_prices = await self.calculate_total(tariffs)
 
             # Initialize dictionary to hold prices with timestamps
@@ -222,20 +192,19 @@ class PriceSensor(Entity):
             self.attrs[ATTR_TRANS_NETTARIF] = tariffs.get("transmissions_nettarif", 0)
             self.attrs[ATTR_SYSTEMTARIF] = tariffs.get("systemtarif", 0)
             self.attrs[ATTR_ELAFGIFT] = tariffs.get("elafgift", 0)
-            self.attrs[ATTR_LAST_UPDATED] = datetime.now().isoformat()
+            self.attrs[ATTR_LAST_UPDATED] = dt_util.now().isoformat()
 
             self._available = True
 
         except Exception as e:
-            _LOGGER.error("Unexpected error in async_update: %s", e)
+            _LOGGER.error("Unexpected error while recomputing price: %s", e)
             self._available = False
 
-    def add_time_stamps(self, prices: list, day: str) -> list:
-        """Attach timestamps to hourly prices with time zone awareness."""
-        # Get Home Assistant's configured time zone
-        tz = timezone(self.hass.config.time_zone)
+        self.async_write_ha_state()
 
-        base_date = datetime.now(tz)
+    def add_time_stamps(self, prices: list, day: str) -> list:
+        """Attach timestamps to hourly prices, using Home Assistant's local time zone."""
+        base_date = dt_util.now()
         if day == "tomorrow":
             base_date += timedelta(days=1)
 
@@ -248,31 +217,14 @@ class PriceSensor(Entity):
             for i, price in enumerate(prices)
         ]
 
-    async def fetch_tariffs(self) -> dict:
-        """Fetch tariffs from Eloverblik."""
-        try:
-            client = Eloverblik(self.config.get(CONF_ELOVERBLIK_TOKEN))
-            tariffs = await self.hass.async_add_executor_job(client.get_tariffs, self.config.get(CONF_METERING_POINT))
-            return tariffs.charges  # Extract charges dictionary
-        except Exception as e:
-            _LOGGER.error("Failed to fetch tariffs: %s", e)
-            return {}  # Return an empty dict to avoid crashing
-
-    async def wait_for_sensor(self, sensor_id, timeout=30):
-        """Wait for a sensor to become available."""
-        for _ in range(timeout):
-            state = self.hass.states.get(sensor_id)
-            if state:
-                return state
-            _LOGGER.warning("Waiting for sensor '%s' to become available", sensor_id)
-            await asyncio.sleep(1)
-        _LOGGER.error("Sensor '%s' did not become available within %s seconds", sensor_id, timeout)
-        return None
-
     async def calculate_total(self, tariffs):
         """Calculate the total electricity prices, including fees and VAT."""
         sensor_id = self.config.get(CONF_PRICE_SENSOR)
-        price_sensor_state = await self.wait_for_sensor(sensor_id)
+        price_sensor_state = self.hass.states.get(sensor_id)
+
+        if price_sensor_state is None:
+            _LOGGER.warning("Sensor '%s' is not available yet. Skipping calculation.", sensor_id)
+            return {ATTR_TODAY: [], ATTR_TOMORROW: []}
 
         # Extract raw Nordpool prices (15‑min data)
         raw_today_prices = price_sensor_state.attributes.get("today", [])
@@ -284,15 +236,11 @@ class PriceSensor(Entity):
         if raw_tomorrow_prices and isinstance(raw_tomorrow_prices[0], dict):
             raw_tomorrow_prices = [p["value"] for p in raw_tomorrow_prices]
 
-        if price_sensor_state is None:
-            _LOGGER.error("Failed to fetch sensor '%s'. Skipping calculation.", sensor_id)
-            return {"today": [0] * 24, "tomorrow": [0] * 24}
-
         # Extract raw prices from the Nordpool sensor
         if len(raw_today_prices) not in (96, 100):
-            _LOGGER.warning("Unexpected number of raw_today_prices: %d (expected 96 or 100)", len(raw_today_prices))
+            _LOGGER.debug("Unexpected number of raw_today_prices: %d (expected 96 or 100)", len(raw_today_prices))
         if len(raw_tomorrow_prices) not in (0, 96, 100):
-            _LOGGER.warning("Unexpected number of raw_tomorrow_prices: %d (expected 0, 96 or 100)", len(raw_tomorrow_prices))
+            _LOGGER.debug("Unexpected number of raw_tomorrow_prices: %d (expected 0, 96 or 100)", len(raw_tomorrow_prices))
 
         # Fixed fees
         transmission_fee = tariffs.get("transmissions_nettarif", 0)
@@ -307,14 +255,13 @@ class PriceSensor(Entity):
         if len(nettarif_c) == 24:
             nettarif_c = [val for val in nettarif_c for _ in range(4)]
         if len(nettarif_c) < total_intervals:
-            _LOGGER.warning("Padding nettarif_c from %d to %d intervals", len(nettarif_c), total_intervals)
+            _LOGGER.debug("Padding nettarif_c from %d to %d intervals", len(nettarif_c), total_intervals)
             nettarif_c.extend([0] * (total_intervals - len(nettarif_c)))
         elif len(nettarif_c) > total_intervals:
-            _LOGGER.warning("Truncating nettarif_c from %d to %d intervals", len(nettarif_c), total_intervals)
+            _LOGGER.debug("Truncating nettarif_c from %d to %d intervals", len(nettarif_c), total_intervals)
             nettarif_c = nettarif_c[:total_intervals]
 
-        # Log lenght of prices
-        _LOGGER.warning("raw_today=%d raw_tomorrow=%d nettarif=%d",
+        _LOGGER.debug("raw_today=%d raw_tomorrow=%d nettarif=%d",
                 len(raw_today_prices), len(raw_tomorrow_prices), len(nettarif_c))
 
         # Calculate total prices with fees and VAT

@@ -4,10 +4,7 @@ from pyeloverblik import Eloverblik
 
 from homeassistant import config_entries
 from homeassistant.core import HomeAssistant
-import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
-from datetime import datetime, timedelta
-from functools import partial
 
 from .const import (
     CONF_PRICE_SENSOR,
@@ -88,24 +85,17 @@ class ElectricityPriceConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._abort_if_unique_id_configured()
         if user_input:
             _LOGGER.debug("User input: %s", user_input)
-            try:
-                await async_validate_sensor(user_input[CONF_PRICE_SENSOR], self.hass)
-            except ValueError:
-                errors["base"] = "invalid_price_sensor"
             if self.hass.states.get(user_input[CONF_PRICE_SENSOR]) is None:
                 errors["base"] = "sensor_not_found"
-                return self.async_show_form(
-                    step_id="user",
-                    data_schema=vol.Schema({
-                        vol.Required(CONF_PRICE_SENSOR): str,
-                    }),
-                    errors=errors,
-                )
+            else:
+                try:
+                    await async_validate_sensor(user_input[CONF_PRICE_SENSOR], self.hass)
+                except ValueError:
+                    errors["base"] = "invalid_price_sensor"
 
             if not errors:
                 self.data = user_input
                 return await self.async_step_eloverblik()
-            self._config[CONF_PRICE_SENSOR] = user_input[CONF_PRICE_SENSOR]
 
         return self.async_show_form(
             step_id="user",
