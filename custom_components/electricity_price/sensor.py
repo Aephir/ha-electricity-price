@@ -247,38 +247,22 @@ class PriceSensor(CoordinatorEntity[TariffCoordinator], Entity):
         system_tariff = tariffs.get("systemtarif", 0)
         electricity_tax = tariffs.get("elafgift", 0)
 
-        # Variable fees (hourly)
-        nettarif_c = tariffs.get("nettarif_c", [0] * 24)
+        # Variable fees: Eloverblik returns one 24-value hourly profile (nettarif_c)
+        # that applies to every day, so map each 15-min interval to its hour of day.
+        hourly = list(tariffs.get("nettarif_c") or [0] * 24)
+        if len(hourly) != 24:
+            _LOGGER.warning("Unexpected nettarif_c length %d (expected 24); missing hours count as 0", len(hourly))
+            hourly = (hourly + [0] * 24)[:24]
 
-        # Expand nettarif_c to match the total number of intervals
-        total_intervals = len(raw_today_prices) + len(raw_tomorrow_prices)
-        if len(nettarif_c) == 24:
-            nettarif_c = [val for val in nettarif_c for _ in range(4)]
-        if len(nettarif_c) < total_intervals:
-            _LOGGER.debug("Padding nettarif_c from %d to %d intervals", len(nettarif_c), total_intervals)
-            nettarif_c.extend([0] * (total_intervals - len(nettarif_c)))
-        elif len(nettarif_c) > total_intervals:
-            _LOGGER.debug("Truncating nettarif_c from %d to %d intervals", len(nettarif_c), total_intervals)
-            nettarif_c = nettarif_c[:total_intervals]
+        def add_fees(prices: list[float]) -> list[float]:
+            per_hour = max(1, round(len(prices) / 24)) if prices else 4
+            return [
+                round(p + transmission_fee + system_tariff + electricity_tax + hourly[min(i // per_hour, 23)], 3)
+                for i, p in enumerate(prices)
+            ]
 
-        _LOGGER.debug("raw_today=%d raw_tomorrow=%d nettarif=%d",
-                len(raw_today_prices), len(raw_tomorrow_prices), len(nettarif_c))
-
-        # Calculate total prices with fees and VAT
-        total_today = []
-        for i, p in enumerate(raw_today_prices):
-            if i >= len(nettarif_c):
-                _LOGGER.error("Index %d out of range for nettarif_c (len=%d)", i, len(nettarif_c))
-                break
-            total_today.append(round(p + transmission_fee + system_tariff + electricity_tax + nettarif_c[i], 3))
-
-        total_tomorrow = []
-        for i, p in enumerate(raw_tomorrow_prices):
-            index = i + len(total_today)
-            if index >= len(nettarif_c):
-                _LOGGER.error("Index %d out of range for nettarif_c (len=%d)", index, len(nettarif_c))
-                break
-            total_tomorrow.append(round(p + transmission_fee + system_tariff + electricity_tax + nettarif_c[index], 3))
+        total_today = add_fees(raw_today_prices)
+        total_tomorrow = add_fees(raw_tomorrow_prices)
 
         # Add VAT (25%)
         total_today = [round(price * 1.25, 3) for price in total_today]
@@ -289,6 +273,6 @@ class PriceSensor(CoordinatorEntity[TariffCoordinator], Entity):
             ATTR_TOMORROW: total_tomorrow,
             "total_fees": {
                 "fixed": round(transmission_fee + system_tariff + electricity_tax, 3),
-                "variable": nettarif_c,
+                "variable": hourly,
             },
         }
